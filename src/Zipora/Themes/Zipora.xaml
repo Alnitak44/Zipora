@@ -1,0 +1,460 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+    <!--          Zipora 现代 Fluent 主题扩展
+         颜色令牌取自 WPF UI 主题字典（Controls/Theme/Dark|Light），
+         自动随明暗主题切换；本字典只定义卡片、动画、Skeleton、图标。 -->
+
+    <!-- Fluent 图标字体（WPF-UI 内置 Fluent System Icons） -->
+    <FontFamily x:Key="FluentIconsFontFamily">pack://application:,,,/Wpf.Ui;component/Resources/Fonts/#FluentSystemIcons-Regular</FontFamily>
+    <FontFamily x:Key="FluentIconsFontFamilyFilled">pack://application:,,,/Wpf.Ui;component/Resources/Fonts/#FluentSystemIcons-Filled</FontFamily>
+    <sys:Double xmlns:sys="clr-namespace:System;assembly=mscorlib" x:Key="IconFontSizeSmall">14</sys:Double>
+
+    <!-- 图标文本（自动跟随主题前景色，写法: icon key 直接用 String） -->
+    <!-- 用转换器 IconToTextConverter / 静态属性绑定；XAML 里常用 SymbolIcon 即可，此处提供等宽行高 -->
+    <Style x:Key="IconText" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource FluentIconsFontFamily}"/>
+        <Setter Property="FontSize" Value="16"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="UseLayoutRounding" Value="True"/>
+        <Setter Property="TextOptions.TextRenderingMode" Value="Ideal"/>
+        <Setter Property="TextOptions.TextFormattingMode" Value="Ideal"/>
+    </Style>
+
+    <!-- 卡片（Card)：基于 WPF-UI CardBackground 令牌 -->
+    <Style x:Key="Card" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource ZiporaCardBackground}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ZiporaCardBorder}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="12"/>
+        <!-- 圆角不仅负责绘制边框，还要裁剪内部矩形内容，避免四角漏出直角毛刺。 -->
+        <Setter Property="ClipToBounds" Value="True"/>
+        <Setter Property="Padding" Value="12"/>
+    </Style>
+
+    <Style x:Key="ToolbarCard" TargetType="Border" BasedOn="{StaticResource Card}">
+        <Setter Property="Background" Value="{DynamicResource ZiporaToolbarBackground}"/>
+    </Style>
+    <Style x:Key="ContentCard" TargetType="Border" BasedOn="{StaticResource Card}">
+        <Setter Property="Background" Value="{DynamicResource ZiporaContentBackground}"/>
+    </Style>
+    <Style x:Key="FlyoutCard" TargetType="Border" BasedOn="{StaticResource Card}">
+        <Setter Property="Background" Value="{DynamicResource ZiporaFlyoutBackground}"/>
+    </Style>
+
+    <!-- Own every tree selection state: native inactive selection uses a light system brush. -->
+    <Style x:Key="ArchiveTreeExpander" TargetType="ToggleButton">
+        <Setter Property="Width" Value="18"/>
+        <Setter Property="Height" Value="26"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border Background="Transparent">
+                        <ui:SymbolIcon x:Name="Chevron" Symbol="ChevronRight16" FontSize="11"
+                                       Foreground="{DynamicResource ZiporaTextSecondary}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       RenderTransformOrigin="0.5,0.5">
+                            <ui:SymbolIcon.RenderTransform><RotateTransform Angle="0"/></ui:SymbolIcon.RenderTransform>
+                        </ui:SymbolIcon>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Chevron" Property="RenderTransform">
+                                <Setter.Value><RotateTransform Angle="90"/></Setter.Value>
+                            </Setter>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="ArchiveTreeItem" TargetType="TreeViewItem">
+        <Setter Property="Foreground" Value="{DynamicResource ZiporaTextPrimary}"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TreeViewItem">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="18"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <ToggleButton x:Name="Expander" Grid.Column="0"
+                                      Style="{StaticResource ArchiveTreeExpander}"
+                                      IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"/>
+                        <Border x:Name="HeaderSurface" Grid.Column="1" Background="Transparent"
+                                BorderBrush="Transparent" BorderThickness="1" CornerRadius="6" Margin="1,1" Padding="4,1">
+                            <ContentPresenter x:Name="PART_Header" ContentSource="Header"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
+                        </Border>
+                        <ItemsPresenter x:Name="ItemsHost" Grid.Row="1" Grid.Column="1"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsExpanded" Value="False">
+                            <Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed"/>
+                        </Trigger>
+                        <Trigger Property="HasItems" Value="False">
+                            <Setter TargetName="Expander" Property="Visibility" Value="Hidden"/>
+                        </Trigger>
+                        <Trigger SourceName="HeaderSurface" Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HeaderSurface" Property="Background" Value="{DynamicResource ZiporaRowHoverFill}"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="HeaderSurface" Property="Background" Value="{DynamicResource ZiporaRowSelectedFill}"/>
+                            <Setter TargetName="HeaderSurface" Property="BorderBrush" Value="{DynamicResource ZiporaRowSelectedStroke}"/>
+                        </Trigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsSelected" Value="True"/>
+                                <Condition Property="IsSelectionActive" Value="False"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="HeaderSurface" Property="Background" Value="{DynamicResource ZiporaRowInactiveFill}"/>
+                            <Setter TargetName="HeaderSurface" Property="BorderBrush" Value="{DynamicResource ZiporaRowInactiveStroke}"/>
+                        </MultiTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Native WPF lists otherwise keep the Windows light background in dark dialogs. -->
+    <Style x:Key="SurfaceListItem" TargetType="ListBoxItem">
+        <Setter Property="Foreground" Value="{DynamicResource ZiporaTextPrimary}"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Border x:Name="Surface" Background="Transparent" BorderBrush="Transparent"
+                            BorderThickness="1" CornerRadius="6" Margin="2,1" Padding="8,6">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Surface" Property="Background" Value="{DynamicResource ZiporaRowHoverFill}"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="Surface" Property="Background" Value="{DynamicResource ZiporaRowSelectedFill}"/>
+                            <Setter TargetName="Surface" Property="BorderBrush" Value="{DynamicResource ZiporaRowSelectedStroke}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="SurfaceListBox" TargetType="ListBox">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource ZiporaTextPrimary}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ZiporaDividerBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="4"/>
+        <Setter Property="ItemContainerStyle" Value="{StaticResource SurfaceListItem}"/>
+    </Style>
+
+    <!-- 半透明浮层卡片（用于状态栏） -->
+    <Style x:Key="OverlayCard" TargetType="Border" BasedOn="{StaticResource Card}">
+        <Setter Property="Background" Value="{DynamicResource ZiporaOverlayBackground}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ZiporaCardBorder}"/>
+        <Setter Property="CornerRadius" Value="12"/>
+    </Style>
+
+    <!-- 次级文本 -->
+    <Style x:Key="SecondaryText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource ZiporaTextSecondary}"/>
+    </Style>
+
+    <!-- 表单标签 -->
+    <Style x:Key="FieldLabel" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource ZiporaTextSecondary}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Margin" Value="1,0,0,4"/>
+    </Style>
+
+    <!--          动画 -->
+    <Duration x:Key="FastDuration">0:0:0.15</Duration>
+    <Duration x:Key="NormalDuration">0:0:0.25</Duration>
+    <Duration x:Key="SlowDuration">0:0:0.4</Duration>
+
+    <CubicEase x:Key="EaseOut" EasingMode="EaseOut"/>
+    <CubicEase x:Key="EaseInOut" EasingMode="EaseInOut"/>
+
+    <!-- 卡片浮起效果（hover 时轻微上浮 + 阴影加深） -->
+    <Style x:Key="InteractiveCard" TargetType="Border" BasedOn="{StaticResource Card}">
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Trigger.EnterActions>
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                             To="-2" Duration="{StaticResource FastDuration}" EasingFunction="{StaticResource EaseOut}"/>
+                        </Storyboard>
+                    </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                             To="0" Duration="{StaticResource FastDuration}" EasingFunction="{StaticResource EaseOut}"/>
+                        </Storyboard>
+                    </BeginStoryboard>
+                </Trigger.ExitActions>
+            </Trigger>
+        </Style.Triggers>
+        <Setter Property="RenderTransform">
+            <Setter.Value>
+                <TranslateTransform/>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 骨架屏的流光画刷由 Light/Dark 色板提供。不要在 Freezable 内嵌 DynamicResource，
+         否则运行时替换主题字典时可能失去继承上下文。 -->
+
+    <Style x:Key="Skeleton" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource ZiporaHoverBackground}"/>
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="Height" Value="12"/>
+        <Setter Property="Margin" Value="0,5"/>
+    </Style>
+
+    <!-- 骨架行：图标圆点 + 两段文字条，用于列表加载占位 -->
+    <DataTemplate x:Key="SkeletonRowTemplate">
+        <Grid Margin="12,9">
+            <StackPanel Orientation="Horizontal">
+                <Border Width="18" Height="18" CornerRadius="4"
+                        Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                        VerticalAlignment="Center"/>
+                <Border Style="{StaticResource Skeleton}" Width="200" Height="10" Margin="12,0,0,0"/>
+                <Border Style="{StaticResource Skeleton}" Width="56" Height="10" Margin="36,0,0,0"/>
+                <Border Style="{StaticResource Skeleton}" Width="56" Height="10" Margin="36,0,0,0"/>
+            </StackPanel>
+            <!-- 流光覆盖层 -->
+            <Border Background="{DynamicResource ZiporaSkeletonShimmerBrush}" CornerRadius="4"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                    Opacity="0.35" IsHitTestVisible="False">
+                <Border.Triggers>
+                    <EventTrigger RoutedEvent="Loaded">
+                        <BeginStoryboard>
+                            <Storyboard RepeatBehavior="Forever">
+                                <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                                                 From="-200" To="0" Duration="0:0:1.4" EasingFunction="{StaticResource EaseInOut}"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </EventTrigger>
+                </Border.Triggers>
+                <Border.RenderTransform>
+                    <TranslateTransform/>
+                </Border.RenderTransform>
+            </Border>
+        </Grid>
+    </DataTemplate>
+
+    <!-- ============================================================
+         原生 ListView 的 Fluent 样式（文件列表）
+         原生控件保证：滚轮原生有效、滚动条常显、滑块可拖动
+         ============================================================ -->
+    <Style x:Key="FileListColumnHeader" TargetType="GridViewColumnHeader">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="GridViewColumnHeader">
+                    <Border Background="Transparent" Padding="0,7" Margin="0,0,0,4">
+                        <TextBlock Text="{TemplateBinding Content}" TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   VerticalAlignment="Center" Margin="8,0"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Setter Property="OverridesDefaultStyle" Value="True"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="FontSize" Value="12"/>
+    </Style>
+
+    <Style TargetType="GridViewColumnHeader" BasedOn="{StaticResource FileListColumnHeader}"/>
+
+    <Style x:Key="FileListItem" TargetType="ListViewItem">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListViewItem">
+                    <Border x:Name="RowSurface"
+                            Background="Transparent"
+                            BorderBrush="Transparent"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Margin="6,1"
+                            Padding="8,3"
+                            SnapsToDevicePixels="True">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <!-- 保留指示条的布局空间，选中与取消选中时文字不会横跳。 -->
+                                <ColumnDefinition Width="3"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="SelectionIndicator"
+                                    Grid.Column="0"
+                                    Background="{DynamicResource AccentFillColorDefaultBrush}"
+                                    CornerRadius="2"
+                                    Margin="0,3,5,3"
+                                    Opacity="0"/>
+                            <GridViewRowPresenter Grid.Column="1"
+                                                  Content="{TemplateBinding Content}"
+                                                  Margin="{TemplateBinding Padding}"
+                                                  SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"
+                                                  VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="RowSurface" Property="Background" Value="{DynamicResource ZiporaRowHoverFill}"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <!-- 低透明度品牌蓝叠层；WPF-UI 的 Secondary token 在部分主题中仍是实心蓝。 -->
+                            <Setter TargetName="RowSurface" Property="Background" Value="{DynamicResource ZiporaRowSelectedFill}"/>
+                            <Setter TargetName="RowSurface" Property="BorderBrush" Value="{DynamicResource ZiporaRowSelectedStroke}"/>
+                            <Setter TargetName="SelectionIndicator" Property="Opacity" Value="1"/>
+                        </Trigger>
+                        <!-- 非活动窗口只保留弱强调，仍能辨认多选项。 -->
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsSelected" Value="True"/>
+                                <Condition Property="Selector.IsSelectionActive" Value="False"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="RowSurface" Property="Background" Value="{DynamicResource ZiporaRowInactiveFill}"/>
+                            <Setter TargetName="RowSurface" Property="BorderBrush" Value="{DynamicResource ZiporaRowInactiveStroke}"/>
+                            <Setter TargetName="SelectionIndicator" Property="Opacity" Value="0.65"/>
+                        </MultiTrigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsSelected" Value="True"/>
+                                <Condition Property="IsMouseOver" Value="True"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="RowSurface" Property="Background" Value="{DynamicResource ZiporaRowSelectedHoverFill}"/>
+                        </MultiTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Setter Property="OverridesDefaultStyle" Value="True"/>
+        <Setter Property="MinHeight" Value="29"/>
+        <Setter Property="Foreground" Value="{DynamicResource ZiporaTextPrimary}"/>
+        <!-- 自定义描边已表达焦点状态，禁用默认虚线框。 -->
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+    </Style>
+
+    <Style x:Key="FileListView" TargetType="ListView">
+        <!-- ListBoxChrome also paints a disabled overlay in OnRender, independent
+             of its Background property. Use an ordinary Border so disabling the
+             parent during OLE drag/extraction cannot paint over the glass surface.
+             Keep the GridView viewer: it supplies headers and scrolling semantics. -->
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListView">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            SnapsToDevicePixels="True">
+                        <ScrollViewer x:Name="PART_ScrollViewer"
+                                      Background="Transparent"
+                                      Padding="{TemplateBinding Padding}"
+                                      Style="{DynamicResource {x:Static GridView.GridViewScrollViewerStyleKey}}">
+                            <ItemsPresenter SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                        </ScrollViewer>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="ScrollViewer.Background" Value="Transparent"/>
+        <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Visible"/>
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+        <Setter Property="ScrollViewer.CanContentScroll" Value="True"/>
+        <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel"/>
+        <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True"/>
+        <Setter Property="ItemContainerStyle" Value="{StaticResource FileListItem}"/>
+        <Setter Property="AlternationCount" Value="0"/>
+    </Style>
+
+    <!-- ============================================================
+         原生 ScrollBar：由 AutoHideScrollBars 按需显现，始终可拖动
+         ============================================================ -->
+    <Style x:Key="FileListScrollBar" TargetType="ScrollBar">
+        <Setter Property="Width" Value="12"/>
+        <Setter Property="MinWidth" Value="12"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollBar">
+                    <Grid Background="Transparent">
+                        <Track x:Name="PART_Track" IsDirectionReversed="True" Margin="2">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/>
+                            </Track.DecreaseRepeatButton>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/>
+                            </Track.IncreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb>
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <Border CornerRadius="4" Margin="2"
+                                                    Background="{DynamicResource ZiporaTextTertiary}"/>
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                        </Track>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Background" Value="{DynamicResource ZiporaHoverBackground}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 文件列表的 ScrollViewer：用上面的按需显现滚动条 -->
+    <Style x:Key="FileListScrollViewer" TargetType="ScrollViewer">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollViewer">
+                    <!-- 背景由 ScrollViewer.Background 提供；自定义背景图启用时可切换为透明。 -->
+                    <Grid Background="{TemplateBinding Background}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ScrollContentPresenter Grid.Column="0" CanContentScroll="{TemplateBinding CanContentScroll}"/>
+                        <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1"
+                                   Style="{StaticResource FileListScrollBar}"
+                                   Value="{TemplateBinding VerticalOffset}"
+                                   Maximum="{TemplateBinding ScrollableHeight}"
+                                   ViewportSize="{TemplateBinding ViewportHeight}"
+                                   Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--      大空态（无压缩包打开时的引导卡片） -->
+    <Style x:Key="EmptyStateIcon" TargetType="ui:SymbolIcon">
+        <Setter Property="Foreground" Value="{DynamicResource ZiporaTextTertiary}"/>
+        <Setter Property="FontSize" Value="64"/>
+        <Setter Property="Filled" Value="False"/>
+    </Style>
+
+    <!-- 工具栏按钮的图标字号 -->
+    <sys:Double xmlns:sys="clr-namespace:System;assembly=mscorlib" x:Key="ToolbarIconFontSize">18</sys:Double>
+
+</ResourceDictionary>

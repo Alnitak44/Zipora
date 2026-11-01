@@ -1,0 +1,62 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ============================================================
+         Zipora 浅色主题（语义色板）
+         所有颜色集中于此，控件一律通过 DynamicResource 引用，
+         由 ThemeManager 在运行时整表切换。
+         ============================================================ -->
+
+    <!-- 窗口 / 卡片 -->
+    <SolidColorBrush x:Key="ZiporaWindowBackground" Color="#F3F3F3"/>
+    <!-- 半透明窗口底色：保留系统 Acrylic/Mica 的透出，同时避免窗口根容器回退成白色。 -->
+    <SolidColorBrush x:Key="ZiporaWindowSurface" Color="#66F3F3F3"/>
+    <SolidColorBrush x:Key="ZiporaCardBackground" Color="#FAFBFD"/>
+    <SolidColorBrush x:Key="ZiporaCardBorder" Color="#E2E6EA"/>
+    <SolidColorBrush x:Key="ZiporaOverlayBackground" Color="#F0F1F3"/>
+    <SolidColorBrush x:Key="ZiporaContentBackground" Color="#FAFBFD"/>
+    <SolidColorBrush x:Key="ZiporaToolbarBackground" Color="#F9FAFC"/>
+    <SolidColorBrush x:Key="ZiporaSidebarBackground" Color="#F2F4F7"/>
+    <SolidColorBrush x:Key="ZiporaBreadcrumbBackground" Color="#F7F9FC"/>
+    <SolidColorBrush x:Key="ZiporaDividerBrush" Color="#E2E7EE"/>
+    <SolidColorBrush x:Key="ZiporaFlyoutBackground" Color="#FAFBFD"/>
+    <SolidColorBrush x:Key="ZiporaEmptyBadgeBackground" Color="#EDF3FC"/>
+
+    <!-- 文字 -->
+    <SolidColorBrush x:Key="ZiporaTextPrimary" Color="#1F1F1F"/>
+    <SolidColorBrush x:Key="ZiporaTextSecondary" Color="#5C5C5C"/>
+    <SolidColorBrush x:Key="ZiporaTextTertiary" Color="#8A8A8A"/>
+
+    <!-- 交互反馈 -->
+    <SolidColorBrush x:Key="ZiporaHoverBackground" Color="#EEF1F5"/>
+    <SolidColorBrush x:Key="ZiporaSelectedBackground" Color="#DDEBFF"/>
+    <SolidColorBrush x:Key="ZiporaAccentBrush" Color="#0078D4"/>
+    <SolidColorBrush x:Key="ZiporaAccentText" Color="#005FB8"/>
+
+    <!-- 列表行（悬浮/选中圆角胶囊） -->
+    <SolidColorBrush x:Key="ZiporaRowHoverFill" Color="#120078D4"/>
+    <SolidColorBrush x:Key="ZiporaRowSelectedFill" Color="#220078D4"/>
+    <SolidColorBrush x:Key="ZiporaRowSelectedStroke" Color="#700078D4"/>
+    <SolidColorBrush x:Key="ZiporaRowInactiveFill" Color="#120078D4"/>
+    <SolidColorBrush x:Key="ZiporaRowInactiveStroke" Color="#400078D4"/>
+    <SolidColorBrush x:Key="ZiporaRowSelectedHoverFill" Color="#380078D4"/>
+
+    <!-- 状态文字 -->
+    <SolidColorBrush x:Key="ZiporaWarningBrush" Color="#C42B1C"/>
+    <SolidColorBrush x:Key="ZiporaSuccessBrush" Color="#0E7A0D"/>
+    <SolidColorBrush x:Key="ZiporaMutedBrush" Color="#6E6E6E"/>
+
+    <!-- 骨架屏：底色 + 流光画刷。主题切换时整体替换画刷，避免 Freezable 上的动态颜色引用。 -->
+    <SolidColorBrush x:Key="ZiporaSkeletonBase" Color="#E6E8EB"/>
+    <LinearGradientBrush x:Key="ZiporaSkeletonShimmerBrush" MappingMode="Absolute"
+                         StartPoint="0,0" EndPoint="200,0" SpreadMethod="Repeat">
+        <GradientStop Offset="0" Color="#00FFFFFF"/>
+        <GradientStop Offset="0.4" Color="#66FFFFFF"/>
+        <GradientStop Offset="0.6" Color="#66FFFFFF"/>
+        <GradientStop Offset="1" Color="#00FFFFFF"/>
+        <LinearGradientBrush.Transform>
+            <MatrixTransform Matrix="0.025,0,0,0.025,0,0"/>
+        </LinearGradientBrush.Transform>
+    </LinearGradientBrush>
+
+</ResourceDictionary>

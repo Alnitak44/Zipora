@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Zipora</RootNamespace>
+    <AssemblyName>Zipora</AssemblyName>
+    <ApplicationIcon>Assets\Zipora.ico</ApplicationIcon>
+    <Version>2.0.33</Version>
+    <Product>Zipora</Product>
+    <Description>Offline Windows archive manager powered by 7-Zip</Description>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Portable)' == 'true'">
+    <DefineConstants>$(DefineConstants);PORTABLE</DefineConstants>
+  </PropertyGroup>
+
+  <!-- 捆绑官方 7-Zip 引擎（7z.exe + 7z.dll），随程序输出到 7zip\ 子目录。
+       7z.exe 必须与 7z.dll 以真实文件形式共存于同一目录，因此排除在单文件外。 -->
+  <ItemGroup>
+    <None Include="7zip\**\*" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+  </ItemGroup>
+
+  <!-- 应用图标：PNG 用于窗口与标题栏，ICO 嵌入生成的 exe。 -->
+  <ItemGroup>
+    <Resource Include="Assets\Zipora.png" />
+    <!-- 资源管理器原生右键菜单需要可直接访问的图标文件，不能只嵌入 exe。 -->
+    <None Include="Assets\Zipora.ico" Link="Zipora.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" ExcludeFromSingleFile="true" />
+  </ItemGroup>
+
+  <!-- Explorer 右键菜单扩展是独立的原生 x64 COM DLL，必须与 Zipora.exe 同目录。 -->
+  <ItemGroup>
+    <None Include="..\Zipora.ShellExtension\build\Release\Zipora.ShellExtension.dll" Condition="'$(Portable)' != 'true' and Exists('..\Zipora.ShellExtension\build\Release\Zipora.ShellExtension.dll')"
+          Link="Zipora.ShellExtension.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="Always"
+          ExcludeFromSingleFile="true" />
+  </ItemGroup>
+
+  <!-- 内置密码字典（用户可自行添加/替换 dictionaries\ 下的 .txt） -->
+  <ItemGroup>
+    <None Include="dictionaries\**\*.txt" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+
+</Project>
