@@ -30,14 +30,14 @@ jobs:
       - name: Build native Explorer extension from public source
         shell: pwsh
         run: |
-          cmake -S src/Zipora.ShellExtension -B src/Zipora.ShellExtension/build -A x64 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_SHARED_LINKER_FLAGS=uuid.lib
+          cmake -S src/Zipora.ShellExtension -B src/Zipora.ShellExtension/build -A x64 '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded' '-DCMAKE_SHARED_LINKER_FLAGS=uuid.lib'
           if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed' }
           cmake --build src/Zipora.ShellExtension/build --config Release
           if ($LASTEXITCODE -ne 0) { throw 'Native extension build failed' }
       - name: Publish normal desktop edition
         shell: pwsh
         run: |
-          dotnet publish src/Zipora/Zipora.csproj -c Release -r win-x64 --self-contained true -p:Portable=false -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:RuntimeFrameworkVersion=8.0.32 -p:DebugType=embedded -o artifacts/Zipora-v2.0.33-win-x64
+          dotnet publish src/Zipora/Zipora.csproj -c Release -r win-x64 --self-contained true '-p:Portable=false' '-p:PublishSingleFile=true' '-p:IncludeNativeLibrariesForSelfExtract=true' '-p:RuntimeFrameworkVersion=8.0.32' '-p:DebugType=embedded' -o artifacts/Zipora-v2.0.33-win-x64
           if ($LASTEXITCODE -ne 0) { throw 'Desktop publish failed' }
       - name: Validate desktop mode, native exports and private-service exclusion
         shell: pwsh
