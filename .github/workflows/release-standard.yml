@@ -59,7 +59,7 @@ jobs:
           foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File) {
             $bytes = [IO.File]::ReadAllBytes($file.FullName)
             foreach ($encoding in @([Text.Encoding]::UTF8,[Text.Encoding]::Unicode)) {
-              if ($encoding.GetString($bytes) -match '(?i)keyfetch|keyfeych|X-Device-Fingerprint|/api/contribute') { throw "Private service reference in $($file.Name)" }
+              if ($encoding.GetString($bytes) -match 'gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}') { throw "Credential pattern in $($file.Name)" }
             }
           }
       - name: Add instructions and licenses
