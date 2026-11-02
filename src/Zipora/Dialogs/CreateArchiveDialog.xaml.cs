@@ -38,17 +38,27 @@ public partial class CreateArchiveDialog : Wpf.Ui.Controls.FluentWindow
     /// <summary>每卷字节数；null 表示不分卷。</summary>
     public long? VolumeSizeBytes { get; private set; }
 
+    /// <summary>用户是否勾选「压缩完成后上传密码到云端」。</summary>
+    public bool UploadToCloud { get; private set; }
 
+    /// <summary>全局「压缩后上传密码」开关（设置页控制）作为对话框默认勾选。</summary>
+    private readonly bool _compressContribute;
 
     private const string DefaultFileName = "新建压缩";
 
-    public CreateArchiveDialog()
+    public CreateArchiveDialog(bool cloudAvailable)
     {
         InitializeComponent();
         Backdrop.ApplyFromSetting(this);
         SourceList.ItemsSource = Sources;
 
+        // 全局「压缩后上传密码」开关（设置页控制）作为默认勾选
+        _compressContribute = Zipora.Services.AuthStore.Load().CompressContributePassword;
 
+        // 只有已激活云端的用户才显示上传选项
+        if (!cloudAvailable)
+            UploadCheck.Visibility = Visibility.Collapsed;
+        UpdateUploadCheck();
 
         foreach (var f in Formats)
         {
@@ -107,7 +117,7 @@ public partial class CreateArchiveDialog : Wpf.Ui.Controls.FluentWindow
             DefaultFileName + CurrentFormat.Ext);
 
     private void PasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
-        { }
+        => UpdateUploadCheck();
 
     private void EncryptArchiveCheck_Changed(object sender, RoutedEventArgs e)
         => UpdateEncryptionControls();
@@ -130,6 +140,7 @@ public partial class CreateArchiveDialog : Wpf.Ui.Controls.FluentWindow
             EncryptHeadersCheck.IsChecked = false;
             SavedPasswordPopup.IsOpen = false;
         }
+        UpdateUploadCheck();
     }
 
     private void UpdateVolumeControls()
@@ -141,6 +152,13 @@ public partial class CreateArchiveDialog : Wpf.Ui.Controls.FluentWindow
         if (!splitting) VolumeSizeBox.Text = "";
     }
 
+    /// <summary>未设置密码时没有可上传的内容：禁用且取消勾选；填入密码后恢复默认勾选。</summary>
+    private void UpdateUploadCheck()
+    {
+        bool hasPwd = EncryptArchiveCheck.IsChecked == true && PasswordBox.Password.Length > 0;
+        UploadCheck.IsEnabled = hasPwd;
+        UploadCheck.IsChecked = hasPwd && _compressContribute;
+    }
 
     private (string Name, string Format, string Ext, bool Pwd) CurrentFormat
     {
@@ -287,6 +305,7 @@ public partial class CreateArchiveDialog : Wpf.Ui.Controls.FluentWindow
         };
         Password = pwd.Length > 0 ? pwd : null;
         EncryptHeaders = EncryptHeadersCheck.IsChecked == true && Password != null;
+        UploadToCloud = Password != null && UploadCheck.IsChecked == true;
         VolumeSizeBytes = volumeSizeBytes;
         DialogResult = true;
     }

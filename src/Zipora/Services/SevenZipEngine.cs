@@ -34,6 +34,7 @@ public record ArchiveTestResult(ArchiveTestStatus Status, string Message);
 /// </summary>
 public partial class SevenZipEngine
 {
+    /// <summary>自动尝试云端候选密码的上限，避免大压缩包反复验证耗时过久。</summary>
     public const int MaxAutoTryCandidates = 10;
 
     private readonly string _exePath;
@@ -349,6 +350,13 @@ public partial class SevenZipEngine
 
     // ---- 创建压缩包 ----
 
+    /// <summary>
+    /// 创建压缩包（压缩功能不需要任何云端凭证）。
+    /// format: "7z" | "zip" | "tar" | "gzip" | "bzip2" | "xz" | "wim" | "sfx"
+    /// gzip/bzip2/xz 不支持多文件与加密：自动先打 tar 再压缩（产物为 .tar.gz 等）。
+    /// sfx 为 7z 自解压 exe（需要同目录 7z.sfx 模块）。
+    /// password 传 null/空表示不加密；level 0-9；volumeSizeBytes 指定后输出 .001/.002… 分卷。
+    /// </summary>
     public async Task<ExtractResult> CreateAsync(
         IReadOnlyList<string> sources, string outFile, string format,
         string? password, int level, bool encryptHeaders,

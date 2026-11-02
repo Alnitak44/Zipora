@@ -1,0 +1,95 @@
+name: Build and release Zipora
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Prepare version and verified engine
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [xml]$xml = Get-Content src/Zipora/Zipora.csproj -Raw
+          $version = $xml.SelectSingleNode('/Project/PropertyGroup/Version').InnerText
+          "VERSION=$version" >> $env:GITHUB_ENV
+          "RELEASE_TAG=v$version" >> $env:GITHUB_ENV
+          Invoke-WebRequest 'https://github.com/Alnitak44/Zipora/releases/download/v2.0.33/Zipora-v2.0.33-win-x64-portable.zip' -OutFile engine-bundle.zip
+          if ((Get-FileHash engine-bundle.zip -Algorithm SHA256).Hash -ne 'E06389148D7358135FC399A918C8211B4FDF5EEC7C4FF5B228D165EF02E31FD1') { throw 'Engine bundle checksum mismatch' }
+          Expand-Archive engine-bundle.zip dependencies
+          foreach ($name in @('7z.exe','7z.dll','7z.sfx','7zCon.sfx','readme.txt','License.txt')) {
+            Copy-Item -LiteralPath (Join-Path 'dependencies/App/7zip' $name) -Destination 'src/Zipora/7zip'
+          }
+      - name: Build native Explorer extension
+        shell: pwsh
+        run: |
+          cmake -S src/Zipora.ShellExtension -B src/Zipora.ShellExtension/build -A x64 '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded' '-DCMAKE_SHARED_LINKER_FLAGS=uuid.lib'
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed' }
+          cmake --build src/Zipora.ShellExtension/build --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
+      - name: Run application regressions
+        shell: pwsh
+        run: |
+          dotnet run --project tests/ArchiveOutputPathRegression -c Release -- artifacts/output-path-test
+          if ($LASTEXITCODE -ne 0) { throw 'Output path regression failed' }
+          dotnet run --project tests/ExtractionRegression -c Release -- artifacts/extraction-test "$pwd/src/Zipora/7zip/7z.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Extraction regression failed' }
+          dotnet run --project tests/AppearanceUpdateRegression -c Release -- artifacts/appearance-test
+          if ($LASTEXITCODE -ne 0) { throw 'Appearance/update/dictionary regression failed' }
+      - name: Locate Inno Setup
+        shell: pwsh
+        run: |
+          $compiler = Get-ChildItem 'C:/Program Files (x86)/Inno Setup */ISCC.exe' -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $compiler) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+            $compiler = Get-ChildItem 'C:/Program Files (x86)/Inno Setup */ISCC.exe' | Sort-Object FullName -Descending | Select-Object -First 1
+          }
+          "ISCC_PATH=$($compiler.FullName)" >> $env:GITHUB_ENV
+      - name: Build installer, standard ZIP and portable ZIP
+        shell: pwsh
+        run: ./scripts/Build-Packages.ps1 -DependencyDirectory "$pwd/dependencies" -IsccPath $env:ISCC_PATH
+      - name: Test installation, directory discovery, upgrade and uninstall
+        shell: pwsh
+        run: ./scripts/Test-Installer.ps1 -Installer "artifacts/release/Zipora-v${env:VERSION}-Setup-x64.exe"
+      - name: Audit staged packages for credentials and personal profiles
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($root in @('artifacts/standard', "artifacts/Zipora-v${env:VERSION}-win-x64-portable")) {
+            foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File) {
+              $bytes = [IO.File]::ReadAllBytes($file.FullName)
+              foreach ($encoding in @([Text.Encoding]::UTF8,[Text.Encoding]::Unicode)) {
+                if ($encoding.GetString($bytes) -match 'gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|AKIA[A-Z0-9]{16}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----') { throw "Credential pattern in $($file.Name)" }
+              }
+            }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zipora-release-and-validation
+          path: |
+            artifacts/release/*
+            artifacts/installer-test/*.log
+          if-no-files-found: ignore
+      - name: Publish one release for all distributions
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) { throw 'Release already exists; refusing to overwrite.' }
+          gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Zipora $env:VERSION" --notes-file docs/RELEASE_NOTES.md --draft
+          if ($LASTEXITCODE -ne 0) { throw 'Draft creation failed' }
+          $assets = @(Get-ChildItem artifacts/release -File | ForEach-Object FullName)
+          gh release upload $env:RELEASE_TAG @assets --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'Asset upload failed' }
+          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

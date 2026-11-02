@@ -14,6 +14,7 @@ using ComDataObject = System.Runtime.InteropServices.ComTypes.IDataObject;
 using System.Windows.Threading;
 using Zipora.Dialogs;
 using Zipora.Services;
+using Zipora.Services.KeyFetch;
 using Microsoft.Win32;
 using System.Linq;
 
@@ -21,6 +22,8 @@ namespace Zipora;
 
 public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 {
+    /// <summary>KeyFetch 云端服务地址（固定，不提供手动配置）。</summary>
+    private const string KeyFetchBaseUrl = "https://KeyFetch.site";
 
     private readonly SevenZipEngine _engine;
     private readonly ObservableCollection<ArchiveEntry> _entries = new();
@@ -28,14 +31,17 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private readonly ObservableCollection<ArchiveTreeNode> _treeRoots = new();
     private readonly Dictionary<string, ArchiveEntry> _directoryEntries = new(StringComparer.OrdinalIgnoreCase);
     private readonly AuthStore _authStore;
+    private readonly LocalRateLimiter _rateLimiter;
+    private readonly string _deviceFp;
 
+    private IKeyFetchClient _keyFetch;
 
     private string? _archivePath;
     private ArchiveInfo? _archiveInfo;
     private string? _md5;
     private long _fileSize;
     private string? _currentPassword;
-    private bool _passwordFromUser;
+    private bool _passwordFromUser;   // 密码来自用户手动输入（解压成功后有资格贡献云端）
     private bool _needsPassword;
     private bool _headerEncrypted;    // 文件名也加密，未拿到密码前列不出目录
     private bool _archiveRiskPromptShown;
@@ -100,6 +106,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
         _engine = new SevenZipEngine(Path.Combine(AppContext.BaseDirectory, "7zip", "7z.exe"));
         _authStore = AuthStore.Load();
+        _rateLimiter = LocalRateLimiter.Load();
+        _deviceFp = _authStore.DeviceFp;
+        _keyFetch = CreateKeyFetchClient();
         Title = BaseTitle;
         TitleBar.Title = BaseTitle;
 
@@ -143,16 +152,17 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             Loaded += (_, _) => OpenCreateWithFiles(files);
         }
 
-
+        Loaded += async (_, _) => await UpdateChecker.CheckWithPromptAsync(this, automatic: true);
     }
 
     // ---------- 空态 / 骨架屏状态管理 ----------
 
     /// <summary>由设置页调用：立即应用或清除主窗口的自定义背景图。</summary>
-    public void SetCustomBackground(string? imagePath)
+    public bool SetCustomBackground(string? imagePath)
     {
         _authStore.CustomBackgroundImagePath = imagePath ?? "";
         ApplyCustomBackground(_authStore.CustomBackgroundImagePath);
+        return string.IsNullOrWhiteSpace(imagePath) || HasCustomBackground;
     }
 
     /// <summary>由设置页调用：立即更新本窗口使用的压缩炸弹防护状态。</summary>
@@ -179,12 +189,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
         try
         {
-            var bitmap = new BitmapImage();
-            bitmap.BeginInit();
-            bitmap.UriSource = new Uri(imagePath, UriKind.Absolute);
-            bitmap.CacheOption = BitmapCacheOption.OnLoad; // 读取后释放文件，用户可移动或替换原图
-            bitmap.EndInit();
-            bitmap.Freeze();
+            var bitmap = BackgroundImages.Read(imagePath);
 
             CustomBackgroundImage.Source = bitmap;
             CustomBackgroundImage.Visibility = Visibility.Visible;
@@ -1206,13 +1211,16 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         DetailsButton.Visibility = Visibility.Visible;
         IntegrityButton.Visibility = Visibility.Visible;
             ExtractButton.Visibility = Visibility.Visible;
-        string source = _fromCrack ? "字典破解" : _passwordFromUser ? "手动输入" : "本地密码";
+        string source = _fromCrack ? "字典破解" : _passwordFromUser ? "手动输入" : "来自云端";
         _fromCrack = false;
         UpdateArchiveSummaryStatus($"密码已就绪（{source}）");
     });
 
+    // ---------- 密码解析：手动输入（云端查询仅由用户点按钮触发） ----------
+
     private async Task<string?> ResolvePasswordAsync(CancellationToken ct)
     {
+        // 字典破解命中：直接用破解密码（消费后清空）。破解获得的密码同样参与解压后的贡献上传。
         if (_prefillPassword != null)
         {
             string cracked = _prefillPassword;
@@ -1221,19 +1229,23 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             var pre = await Task.Run(() => _engine.TestPassword(_archivePath!, cracked, ct), ct);
             if (pre == PasswordTestResult.Ok)
             {
+                _passwordFromUser = true; // 用户主动破解获得，验证正确即允许贡献上传
                 _fromCrack = true;
+                if (_md5 != null) ContributePasswordInBackground(cracked, _md5, _fileSize);
                 return cracked;
             }
         }
 
-        string info = "请输入压缩包密码，或使用本地字典破解。";
+        string info = "请手动输入密码；如需云端查询，可点击「云端查询」按钮。";
 
         while (true)
         {
             var dlg = new PasswordDialog(
-                Path.GetFileName(_archivePath!), info)
+                Path.GetFileName(_archivePath!), info,
+                cloudConfigured: _keyFetch.IsConfigured)
             { Owner = this };
 
+            dlg.CloudPasswordFinder = (token, report) => FetchCloudPasswordAsync(token, report);
 
             string pwd;
             if (dlg.ShowDialog() != true)
@@ -1267,6 +1279,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             {
                 case PasswordTestResult.Ok:
                     _passwordFromUser = true;
+                    if (_md5 != null) ContributePasswordInBackground(pwd, _md5, _fileSize);
                     return pwd;
 
                 case PasswordTestResult.WrongPassword:
@@ -1284,6 +1297,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     /// <summary>
+    /// 确保当前已打开压缩包的密码可用：需要密码且未缓存时弹标准密码框（含云端查询/字典破解），
     /// 验证正确后缓存到 _currentPassword。返回 true 表示密码已就绪（或无需密码）。
     /// </summary>
     private async Task<bool> EnsurePasswordForArchiveAsync(CancellationToken ct = default)
@@ -1297,6 +1311,95 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         return true;
     }
 
+    /// <summary>密码验证正确后在后台匿名上传云端（不阻塞界面、不显示状态提醒）。</summary>
+    private void ContributePasswordInBackground(string pwd, string md5, long size)
+    {
+        if (!AuthStore.Load().AutoContributePassword) return;
+        if (!_keyFetch.IsConfigured) return;
+        if (string.IsNullOrEmpty(md5)) return;
+
+        var (ok, _) = _rateLimiter.TryContribute();
+        if (!ok) return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _keyFetch.ContributeAsync(md5, size, pwd, CancellationToken.None);
+            }
+            catch
+            {
+                // 后台上传失败静默，不打扰用户
+            }
+        });
+    }
+
+    /// <summary>向云端查询密码并验证；成功返回密码，失败/无结果返回 null。</summary>
+    private async Task<string?> FetchCloudPasswordAsync(CancellationToken ct, Action<string> report)
+    {
+        if (_md5 == null || _archivePath == null)
+            return null;
+        if (!_keyFetch.IsConfigured) return null;
+
+        // 本地限流：每日 10 次查询 + 最小请求间隔，超限不发请求
+        var (ok, limitMsg) = _rateLimiter.TryQuery();
+        if (!ok)
+        {
+            report(limitMsg);
+            return null;
+        }
+
+        report("正在向云端查询密码…");
+        FetchResult r;
+        try
+        {
+            r = await _keyFetch.FetchPasswordAsync(_md5, _fileSize, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            report($"云端查询失败：{ex.Message}");
+            return null;
+        }
+
+        switch (r.Status)
+        {
+            case FetchStatus.Ok:
+                report("云端找到密码，正在验证…");
+                var test = await Task.Run(() => _engine.TestPassword(_archivePath, r.Password!, ct), ct);
+                if (test == PasswordTestResult.Ok)
+                {
+                    report("云端密码验证成功。");
+                    return r.Password;
+                }
+                report("云端返回的密码不正确。");
+                return null;
+
+            case FetchStatus.NotFound:
+                report("云端未收录该文件。");
+                return null;
+
+            case FetchStatus.QuotaExceeded:
+                report(r.Message ?? "云端今日查询额度已用完，明日恢复。");
+                return null;
+
+            default:
+                report(r.Message ?? "云端查询失败。");
+                return null;
+        }
+    }
+
+    private void CloudSearch_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busyCts != null)
+        {
+            MessageBox.Show(this, "正在处理任务，请稍候。", "Zipora",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var dlg = new CloudSearchDialog(_deviceFp, _md5) { Owner = this };
+        dlg.ShowDialog();
+    }
 
     private void Credits_Click(object sender, RoutedEventArgs e)
     {
@@ -1321,7 +1424,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (_busyCts != null) return;
 
-        var dlg = new CreateArchiveDialog { Owner = this };
+        var dlg = new CreateArchiveDialog(_keyFetch.IsConfigured) { Owner = this };
         if (preselect != null)
             foreach (var f in preselect)
                 if (!dlg.Sources.Contains(f)) dlg.Sources.Add(f);
@@ -1357,6 +1460,33 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             ok = true;
             Status(result.Message + " 位置：" + (dlg.VolumeSizeBytes.HasValue ? outFile + ".001" : outFile));
         });
+
+        // 创建成功后仍用 7-Zip 回读验证一次密码；仅验证通过才允许上传。
+        // 这样服务端收到的每条自动贡献都已在本机对应压缩包上实际验证。
+        if (ok && dlg.UploadToCloud && dlg.Password != null && _keyFetch.IsConfigured)
+        {
+            string outPath = dlg.VolumeSizeBytes.HasValue ? outFile + ".001" : outFile;
+            string pwd = dlg.Password;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var verification = _engine.TestPassword(outPath, pwd, CancellationToken.None);
+                    if (verification != PasswordTestResult.Ok) return;
+
+                    var (limitOk, _) = _rateLimiter.TryContribute();
+                    if (!limitOk) return;
+
+                    string md5 = await HashHelper.ComputeMd5Async(outPath, null, CancellationToken.None);
+                    long size = new FileInfo(outPath).Length;
+                    await _keyFetch.ContributeAsync(md5, size, pwd, CancellationToken.None);
+                }
+                catch
+                {
+                    // 后台上传失败静默，不打扰用户
+                }
+            });
+        }
 
         // 询问放在 busy 区外，避免点「是」时被任务占用拦截
         if (ok &&
@@ -1594,8 +1724,37 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     // ---------- 更新检测 ----------
 
+    private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        Status("正在检测更新…");
+        var info = await UpdateChecker.CheckAsync();
+        if (info == null)
+        {
+            Status("检查更新失败（网络异常或服务器不可用）。");
+            ShowNotice("检查更新失败", "网络异常或更新服务器暂不可用，请稍后再试。", NoticeKind.Warning);
+            return;
+        }
+        if (info.IsNewer)
+        {
+            PromptUpdate(info);
+        }
+        else
+        {
+            Status($"当前已是最新版本 v{AppInfo.Version}。");
+            ShowNotice("已是最新版本", $"当前使用的是 Zipora v{AppInfo.Version}。", NoticeKind.Success);
+        }
+    }
 
     /// <summary>提示有新版本，用户确认后打开官网下载页。</summary>
+    private void PromptUpdate(UpdateInfo info)
+    {
+        string notes = string.IsNullOrWhiteSpace(info.Notes) ? "" : $"\n\n更新说明：{info.Notes}";
+        var dialog = new NoticeDialog("发现新版本",
+            $"发现 Zipora v{info.LatestVersion}，当前版本为 v{AppInfo.Version}。{notes}\n\n是否前往下载页面？",
+            NoticeKind.Update, "前往下载", "暂不") { Owner = this };
+        if (dialog.ShowDialog() == true)
+            UpdateChecker.OpenDownloadPage(info.DownloadUrl);
+    }
 
     private void ShowNotice(string title, string message, NoticeKind kind)
         => new NoticeDialog(title, message, kind) { Owner = this }.ShowDialog();
@@ -1711,6 +1870,17 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     // ---------- 通用辅助 ----------
 
+    private IKeyFetchClient CreateKeyFetchClient()
+    {
+        try
+        {
+            return new HttpKeyFetchClient(KeyFetchBaseUrl, _deviceFp);
+        }
+        catch (ArgumentException)
+        {
+            return NullKeyFetchClient.Instance;
+        }
+    }
 
     private void ResetArchiveState()
     {

@@ -1,0 +1,45 @@
+<ui:FluentWindow x:Class="Zipora.Dialogs.CloudSearchDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="云端搜索" Width="560" SizeToContent="Height" WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize" ShowInTaskbar="False" ExtendsContentIntoTitleBar="True"
+        Background="{DynamicResource ZiporaWindowSurface}" WindowCornerPreference="Round"
+        FontFamily="Microsoft YaHei UI" FontSize="13">
+    <Grid Margin="16">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <ui:TitleBar Grid.Row="0" Title="云端搜索" ShowMaximize="False" ShowMinimize="False" FontSize="16" FontWeight="SemiBold"/>
+        <StackPanel Grid.Row="1" Margin="0,8,0,0">
+            <Border Style="{StaticResource Card}" Padding="14" Margin="0,0,0,10">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Cloud20" FontSize="18" Margin="0,0,8,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                        <TextBlock Text="KeyFetch 云端密码搜索" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <TextBlock x:Name="QuotaText" Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}" Padding="14" Margin="0,0,0,10">
+                <StackPanel>
+                    <TextBlock Text="按文件 MD5 搜索密码" FontWeight="SemiBold"/>
+                    <Grid Margin="0,10,0,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <ui:TextBox x:Name="Md5Box" Grid.Column="0" PlaceholderText="32 位十六进制 MD5" ToolTip="可直接粘贴，或选择文件自动计算"/>
+                        <ui:Button x:Name="PickFileButton" Grid.Column="1" Margin="8,0,0,0" Style="{StaticResource DialogSecondaryButton}" Click="PickFileButton_Click" Content="选择文件…"/>
+                        <ui:Button x:Name="SearchButton" Grid.Column="2" Margin="8,0,0,0" Style="{StaticResource DialogPrimaryButton}" Click="SearchButton_Click" Content="搜索"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+            <Border x:Name="ResultPanel" Background="{DynamicResource ControlFillColorSecondaryBrush}" CornerRadius="6" Padding="10,7" Margin="0,0,0,10" Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal">
+                    <ui:ProgressRing x:Name="ResultSpinner" IsIndeterminate="True" Width="14" Height="14" Margin="0,0,8,0" VerticalAlignment="Center" Visibility="Collapsed"/>
+                    <TextBlock x:Name="ResultText" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,4">
+                <ui:Button x:Name="CopyButton" Style="{StaticResource DialogSecondaryButton}" Click="CopyButton_Click" Content="复制密码" IsEnabled="False"/>
+                <ui:Button Content="关闭" Style="{StaticResource DialogSecondaryButton}" IsCancel="True"/>
+            </StackPanel>
+        </StackPanel>
+    </Grid>
+</ui:FluentWindow>

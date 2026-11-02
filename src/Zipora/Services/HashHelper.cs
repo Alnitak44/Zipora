@@ -28,6 +28,7 @@ public static class HashHelper
             if (total > 0) progress?.Report(readTotal * 100.0 / total);
         }
         md5.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        // 大写十六进制，与 md5.bat（certutil 输出）保持同款格式，便于与已有云端记录互通
         return Convert.ToHexString(md5.Hash!);
     }
 

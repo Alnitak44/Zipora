@@ -8,3 +8,6 @@ The MIT license at the repository root applies to Zipora-owned code only.
 - **.NET runtime and libraries** — Microsoft and contributors. Dependencies restored by NuGet and self-contained runtime distributions retain their own licenses and notices. Preserve the runtime's LICENSE and ThirdPartyNotices files in self-contained distributions.
 
 Source references in the credits UI do not imply that all referenced projects' code has been included. Distributors are responsible for reviewing the exact versions and artifacts they ship.
+
+- **System.Management** (8.0.0) — Microsoft, retained under its upstream licenses; distributions include its LICENSE and THIRD-PARTY-NOTICES.
+- **Inno Setup** — Jordan Russell, Martijn Laan and contributors, https://jrsoftware.org/ . Installers retain the compiler/runtime license; the Simplified Chinese translation in installer/ is retained from the upstream jrsoftware/issrc repository with its original attribution.

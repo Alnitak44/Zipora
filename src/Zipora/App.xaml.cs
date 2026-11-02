@@ -89,6 +89,7 @@ public partial class App : Application
         // 支持命令行参数直接打开压缩包：Zipora.exe <archive>（右键子菜单同样携带该参数）
         // 注意：--create 模式下文件列表是待压缩内容，不当作压缩包打开
         string? archive = createIdx < 0 ? args.FirstOrDefault(a => File.Exists(a)) : null;
+        InstallationLifetime.Register();
         var window = new MainWindow(archive);
         if (AppStorage.IsPortable) window.Title = "Zipora Portable";
         window.Show();

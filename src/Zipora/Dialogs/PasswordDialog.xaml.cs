@@ -18,18 +18,24 @@ public partial class PasswordDialog : FluentWindow
         return System.Windows.Application.Current?.TryFindResource(key) as System.Windows.Media.Brush ?? fallback;
     }
 
+    /// <summary>
+    /// 云端查询回调（由主窗口注入）：参数为 (取消令牌, 状态上报)。
+    /// 返回云端可用密码；返回 null 表示云端没有。
+    /// </summary>
+    public Func<CancellationToken, Action<string>, Task<string?>>? CloudPasswordFinder { get; set; }
 
     public string? Password { get; private set; }
 
     /// <summary>用户点击了「字典破解」按钮（对话框将关闭，由主窗口接管破解流程）。</summary>
     public bool CrackRequested { get; private set; }
 
-    public PasswordDialog(string archiveName, string infoText)
+    public PasswordDialog(string archiveName, string infoText, bool cloudConfigured)
     {
         InitializeComponent();
         ArchiveNameText.Text = archiveName;
         InfoText.Text = infoText;
 
+        CloudButton.Visibility = cloudConfigured ? Visibility.Visible : Visibility.Collapsed;
         PopulateSavedPasswords();
         Loaded += (_, _) => PasswordBox.Focus();
 
@@ -81,6 +87,39 @@ public partial class PasswordDialog : FluentWindow
         Close();
     }
 
+    private async void CloudButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (CloudPasswordFinder == null) return;
+
+        CloudButton.IsEnabled = false;
+        ShowStatus("正在查询云端…");
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            string? found = await CloudPasswordFinder(cts.Token, s => ShowStatus(s));
+            if (found != null)
+            {
+                Password = found;
+                DialogResult = true;
+            }
+            else
+            {
+                SetStatus("云端没有这个文件的可用密码，请手动输入。", error: false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("云端查询已取消/超时。", error: true);
+        }
+        catch (Exception ex)
+        {
+            SetStatus("云端查询失败：" + ex.Message, error: true);
+        }
+        finally
+        {
+            CloudButton.IsEnabled = true;
+        }
+    }
 
     private void ShowStatus(string text)
     {

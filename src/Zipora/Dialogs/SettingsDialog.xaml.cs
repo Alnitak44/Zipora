@@ -30,6 +30,8 @@ public partial class SettingsDialog : FluentWindow
             RefreshThemeState();
             RefreshBackdropState();
             RefreshBackgroundImageState();
+            RefreshUpdateState();
+            RefreshContributeState();
             RefreshArchiveBombProtectionState();
         };
         Backdrop.ApplyFromSetting(this);
@@ -126,19 +128,77 @@ public partial class SettingsDialog : FluentWindow
 
     private void SaveBackgroundImage(string imagePath)
     {
-        imagePath = AppStorage.ImportBackground(imagePath);
-        var store = AuthStore.Load();
-        store.CustomBackgroundImagePath = imagePath;
-        store.Save();
-
-        if (Application.Current.MainWindow is Zipora.MainWindow main)
-            main.SetCustomBackground(imagePath);
-
-        RefreshBackgroundImageState();
+        try
+        {
+            string saved = "";
+            if (!string.IsNullOrWhiteSpace(imagePath))
+            {
+                var image = BackgroundImages.Read(imagePath);
+                if (BackgroundImages.NeedsCrop(image.PixelWidth, image.PixelHeight))
+                {
+                    var crop = new BackgroundCropDialog(image) { Owner = this };
+                    if (crop.ShowDialog() != true || crop.Result == null) return;
+                    image = crop.Result;
+                }
+                saved = BackgroundImages.Save(image);
+            }
+            var store = AuthStore.Load();
+            store.CustomBackgroundImagePath = saved;
+            store.Save();
+            if (Application.Current.MainWindow is Zipora.MainWindow main && !main.SetCustomBackground(saved))
+                new NoticeDialog("请重新启动 Zipora", "背景图已保存，但当前窗口刷新失败。请完成正在进行的操作后关闭并重新打开 Zipora。", NoticeKind.Warning) { Owner = this }.ShowDialog();
+            RefreshBackgroundImageState();
+        }
+        catch (Exception ex)
+        {
+            new NoticeDialog("背景图设置失败", "无法保存或加载图片，请检查图片格式、磁盘空间和写保护。原设置不会因裁切取消而改变。\n\n" + ex.Message, NoticeKind.Warning) { Owner = this }.ShowDialog();
+        }
     }
 
+    private void RefreshUpdateState()
+    {
+        _suppressEvents = true;
+        UpdateFrequencyBox.SelectedIndex = (int)AuthStore.Load().UpdateFrequency;
+        _suppressEvents = false;
+    }
+    private void UpdateFrequency_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_suppressEvents || UpdateFrequencyBox.SelectedIndex < 0) return;
+        try
+        {
+            var store = AuthStore.Load();
+            store.UpdateFrequency = (UpdateFrequency)UpdateFrequencyBox.SelectedIndex;
+            store.Save();
+        }
+        catch (Exception ex) { AppStorage.ReportSaveFailure(ex); }
+    }
+    private async void CheckUpdates_Click(object sender, RoutedEventArgs e)
+    {
+        CheckUpdatesButton.IsEnabled = false;
+        CheckUpdatesButton.Content = "正在检查…";
+        try { await UpdateChecker.CheckWithPromptAsync(this); }
+        finally { CheckUpdatesButton.IsEnabled = true; CheckUpdatesButton.Content = "立即检查"; }
+    }
 
+    // ---------- 密码上传（解压后 / 压缩后） ----------
 
+    private void RefreshContributeState()
+    {
+        _suppressEvents = true;
+        var store = AuthStore.Load();
+        ExtractUploadBox.IsChecked = store.AutoContributePassword;
+        CompressUploadBox.IsChecked = store.CompressContributePassword;
+        _suppressEvents = false;
+    }
+
+    private void Contribute_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppressEvents) return;
+        var store = AuthStore.Load();
+        store.AutoContributePassword = ExtractUploadBox.IsChecked == true;
+        store.CompressContributePassword = CompressUploadBox.IsChecked == true;
+        store.Save();
+    }
 
     private void ManagePasswords_Click(object sender, RoutedEventArgs e)
     {

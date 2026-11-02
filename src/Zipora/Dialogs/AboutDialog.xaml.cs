@@ -12,6 +12,7 @@ public partial class AboutDialog : Wpf.Ui.Controls.FluentWindow
     {
         InitializeComponent();
         VersionText.Text = $"版本 {AppInfo.Version}";
+        CloudStateText.Text = "已向所有用户开放（每日额度限制仍生效）";
         Backdrop.ApplyFromSetting(this);
     }
 

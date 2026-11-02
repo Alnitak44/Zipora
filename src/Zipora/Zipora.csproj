@@ -9,9 +9,9 @@
     <RootNamespace>Zipora</RootNamespace>
     <AssemblyName>Zipora</AssemblyName>
     <ApplicationIcon>Assets\Zipora.ico</ApplicationIcon>
-    <Version>2.0.33</Version>
+    <Version>2.0.39</Version>
     <Product>Zipora</Product>
-    <Description>Offline Windows archive manager powered by 7-Zip</Description>
+    <Description>套壳 7-Zip 的解压工具，集成 KeyFetch 云端压缩包密码查询/共享</Description>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
   </PropertyGroup>
 
@@ -46,7 +46,9 @@
     <None Include="dictionaries\**\*.txt" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 
+  <!-- 设备指纹（WMI）用于云服务的本地配额标识。 -->
   <ItemGroup>
+    <PackageReference Include="System.Management" Version="8.0.0" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>

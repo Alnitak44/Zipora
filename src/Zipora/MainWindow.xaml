@@ -1,287 +1,426 @@
-<ui:FluentWindow x:Class="Zipora.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml" xmlns:behaviors="clr-namespace:Zipora.Behaviors" Title="Zipora" Icon="pack://application:,,,/Assets/Zipora.png" Height="640" Width="960" MinHeight="480" MinWidth="720" ExtendsContentIntoTitleBar="True" Background="{DynamicResource ZiporaWindowSurface}" WindowCornerPreference="Round" AllowDrop="True" Drop="Window_Drop" DragOver="Window_DragOver" DragEnter="Window_DragOver" FontFamily="Microsoft YaHei UI" FontSize="13" TextOptions.TextRenderingMode="ClearType">
-  <Grid>
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="*" />
-      <RowDefinition Height="Auto" />
-    </Grid.RowDefinitions>
-    <!-- 拖出压缩包内容时显示紧贴鼠标的小图标；不遮挡目标窗口。 -->
-    <Popup x:Name="DragPreviewPopup" Placement="MousePoint" PlacementTarget="{Binding ElementName=FileList}" StaysOpen="True" AllowsTransparency="True" IsHitTestVisible="False" PopupAnimation="Fade">
-      <Border Background="{DynamicResource ZiporaFlyoutBackground}" BorderBrush="{DynamicResource ZiporaCardBorder}" Width="34" Height="34" BorderThickness="1" CornerRadius="6" Opacity="0.94">
-        <ui:SymbolIcon x:Name="DragPreviewIcon" Symbol="Document20" FontSize="19" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource ZiporaAccentBrush}" />
-      </Border>
-    </Popup>
-    <!-- 自定义背景：仅作最底层视觉，不参与命中测试。 -->
-    <Image x:Name="CustomBackgroundImage" Grid.RowSpan="3" Stretch="UniformToFill" Opacity="0.9" Visibility="Collapsed" IsHitTestVisible="False" />
-    <!-- ========== 自绘标题栏（延伸到客户区） ========== -->
-    <ui:TitleBar x:Name="TitleBar" Grid.Row="0" Title="Zipora" ShowMaximize="True" ShowMinimize="True">
-      <ui:TitleBar.Header>
-        <!-- 由 TitleBar 负责高度，内容始终与右侧窗口控制按钮同一垂直中线。 -->
-        <Grid Margin="8,0,0,0">
-          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-            <Image Source="pack://application:,,,/Assets/Zipora.png" Width="16" Height="16" Margin="0,0,6,0" VerticalAlignment="Center" SnapsToDevicePixels="True" />
-            <TextBlock Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}" VerticalAlignment="Center" Foreground="{DynamicResource ZiporaTextPrimary}" />
-          </StackPanel>
-        </Grid>
-      </ui:TitleBar.Header>
-    </ui:TitleBar>
-    <Grid x:Name="RootPanel" Grid.Row="1" Margin="14,4,14,0">
-      <Grid.RowDefinitions>
-        <RowDefinition Height="Auto" />
-        <!-- 列表必须处于受限的 * 行内，ScrollViewer 才能计算可滚动高度。 -->
-        <RowDefinition Height="*" />
-        <RowDefinition Height="Auto" />
-      </Grid.RowDefinitions>
-      <!-- ========== 工具栏卡片 ========== -->
-      <Border x:Name="ToolbarCard" Grid.Row="0" Style="{StaticResource ToolbarCard}" Padding="8,6" Margin="0,0,0,8" ClipToBounds="True">
-        <Grid>
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
-          </Grid.ColumnDefinitions>
-          <StackPanel Grid.Column="0" Orientation="Horizontal">
-            <ui:Button Appearance="Transparent" Padding="12,7" Margin="0,0,6,0" Click="OpenArchive_Click" ToolTip="打开压缩包">
-              <StackPanel Orientation="Horizontal">
-                <ui:SymbolIcon Symbol="FolderOpen20" FontSize="17" Margin="0,0,7,0" />
-                <TextBlock Text="打开" />
-              </StackPanel>
-            </ui:Button>
-            <ui:Button Appearance="Transparent" Padding="12,7" Margin="0,0,6,0" Click="CreateArchive_Click" ToolTip="新建压缩包">
-              <StackPanel Orientation="Horizontal">
-                <ui:SymbolIcon Symbol="Add20" FontSize="17" Margin="0,0,7,0" />
-                <TextBlock Text="新建" />
-              </StackPanel>
-            </ui:Button>
-            <ui:Button x:Name="ExtractButton" Visibility="Collapsed" Appearance="Primary" Padding="12,7" Margin="0,0,6,0" Click="Extract_Click" ToolTip="将整个压缩包解压到指定文件夹">
-              <StackPanel Orientation="Horizontal">
-                <ui:SymbolIcon Symbol="Archive20" FontSize="17" Margin="0,0,7,0" />
-                <TextBlock Text="解压到…" />
-              </StackPanel>
-            </ui:Button>
-            <ui:Button x:Name="DetailsButton" Visibility="Collapsed" Appearance="Secondary" Padding="12,7" Margin="6,0,0,0" Click="ArchiveDetails_Click" ToolTip="查看压缩包的格式、结构、安全与内容统计">
-              <StackPanel Orientation="Horizontal">
-                <ui:SymbolIcon Symbol="Info20" FontSize="17" Margin="0,0,7,0" />
-                <TextBlock Text="详细信息" />
-              </StackPanel>
-            </ui:Button>
-            <ui:Button x:Name="IntegrityButton" Visibility="Collapsed" Appearance="Secondary" Padding="12,7" Margin="6,0,0,0" Click="TestArchiveIntegrity_Click" ToolTip="全量读取并验证压缩包数据与 CRC">
-              <StackPanel Orientation="Horizontal">
-                <ui:SymbolIcon Symbol="CheckmarkCircle20" FontSize="17" Margin="0,0,7,0" />
-                <TextBlock Text="校验完整性" />
-              </StackPanel>
-            </ui:Button>
-          </StackPanel>
-          <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-            <ui:Button Appearance="Transparent" Padding="8,6" Margin="0,0,4,0" Click="DictionaryCrack_Click" ToolTip="字典破解">
-              <ui:SymbolIcon Symbol="Key20" FontSize="17" VerticalAlignment="Center" />
-            </ui:Button>
-            <ui:Button x:Name="MoreButton" Appearance="Transparent" Padding="8,6" Click="MoreButton_Click" ToolTip="更多" ContextMenuService.Placement="Bottom">
-              <ui:SymbolIcon Symbol="MoreHorizontal20" FontSize="17" VerticalAlignment="Center" />
-              <ui:Button.ContextMenu>
-                <ContextMenu>
-                  <MenuItem Header="设置…" Click="Settings_Click">
-                    <MenuItem.Icon>
-                      <ui:SymbolIcon Symbol="Settings20" />
-                    </MenuItem.Icon>
-                  </MenuItem>
-                  <MenuItem Header="关于 Zipora" Click="About_Click">
-                    <MenuItem.Icon>
-                      <ui:SymbolIcon Symbol="Info20" />
-                    </MenuItem.Icon>
-                  </MenuItem>
-                  <MenuItem Header="鸣谢…" Click="Credits_Click">
-                    <MenuItem.Icon>
-                      <ui:SymbolIcon Symbol="HatGraduation20" />
-                    </MenuItem.Icon>
-                  </MenuItem>
-                  <Separator />
-                  <MenuItem Header="退出" Click="Exit_Click">
-                    <MenuItem.Icon>
-                      <ui:SymbolIcon Symbol="Dismiss20" />
-                    </MenuItem.Icon>
-                  </MenuItem>
-                </ContextMenu>
-              </ui:Button.ContextMenu>
-            </ui:Button>
-          </StackPanel>
-        </Grid>
-      </Border>
-      <!-- ========== 文件列表卡片 ========== -->
-      <Border x:Name="FileListCard" Grid.Row="1" Style="{StaticResource ContentCard}" Padding="0" ClipToBounds="True">
-        <Grid>
-          <Grid.RowDefinitions>
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-          </Grid.RowDefinitions>
-          <ListView x:Name="FileList" Grid.Row="0" Margin="0,2" Style="{StaticResource FileListView}" SelectionMode="Extended" HorizontalContentAlignment="Stretch" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource FileListItem}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Visible" behaviors:AutoHideScrollBars.Enabled="True" VirtualizingPanel.ScrollUnit="Pixel" PreviewMouseLeftButtonDown="FileList_PreviewMouseLeftButtonDown" PreviewMouseMove="FileList_PreviewMouseMove" PreviewMouseLeftButtonUp="FileList_PreviewMouseLeftButtonUp" PreviewMouseDoubleClick="FileList_MouseDoubleClick" SelectionChanged="FileList_SelectionChanged" PreviewKeyDown="FileList_PreviewKeyDown" ContextMenuOpening="FileList_ContextMenuOpening" AutomationProperties.HelpText="拖到资源管理器即可解压；Ctrl/Shift 多选；Enter 打开；Backspace 返回上级">
-            <ListView.Resources>
-              <!-- ListView 内部的 ScrollViewer 通过隐式样式应用自定义模板。 -->
-              <Style TargetType="ScrollViewer" BasedOn="{StaticResource FileListScrollViewer}" />
-            </ListView.Resources>
-            <ListView.ContextMenu>
-              <ContextMenu>
-                <MenuItem x:Name="CtxOpen" Header="打开" Click="CtxOpen_Click">
-                  <MenuItem.Icon>
-                    <ui:SymbolIcon Symbol="Open20" />
-                  </MenuItem.Icon>
-                </MenuItem>
-                <Separator />
-                <MenuItem x:Name="CtxExtractCurrent" Header="解压到当前目录" Click="CtxExtractCurrent_Click">
-                  <MenuItem.Icon>
-                    <ui:SymbolIcon Symbol="Archive20" />
-                  </MenuItem.Icon>
-                </MenuItem>
-                <MenuItem x:Name="CtxExtractDesktop" Header="解压到桌面" Click="CtxExtractDesktop_Click">
-                  <MenuItem.Icon>
-                    <ui:SymbolIcon Symbol="Desktop20" />
-                  </MenuItem.Icon>
-                </MenuItem>
-                <MenuItem x:Name="CtxExtractPick" Header="解压到指定目录…" Click="CtxExtractPick_Click">
-                  <MenuItem.Icon>
-                    <ui:SymbolIcon Symbol="FolderOpen20" />
-                  </MenuItem.Icon>
-                </MenuItem>
-              </ContextMenu>
-            </ListView.ContextMenu>
-            <ListView.View>
-              <GridView AllowsColumnReorder="False">
-                <GridViewColumn Header="名称" Width="480">
-                  <GridViewColumn.CellTemplate>
-                    <DataTemplate>
-                      <StackPanel Orientation="Horizontal" Margin="0,0,8,0">
-                        <ui:SymbolIcon Symbol="{Binding TypeIcon}" FontSize="17" Margin="0,0,8,0" VerticalAlignment="Center" ToolTip="{Binding TypeIconText}" />
-                        <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                        <ui:SymbolIcon Symbol="LockClosed16" FontSize="12" Margin="6,0,0,0" Foreground="{DynamicResource ZiporaTextTertiary}" Visibility="{Binding EncryptedIconVisibility}" />
-                      </StackPanel>
-                    </DataTemplate>
-                  </GridViewColumn.CellTemplate>
-                </GridViewColumn>
-                <GridViewColumn Header="大小" Width="110" DisplayMemberBinding="{Binding SizeText}" />
-                <GridViewColumn Header="打包后" Width="110" DisplayMemberBinding="{Binding PackedSizeText}" />
-                <GridViewColumn Header="加密" Width="60">
-                  <GridViewColumn.CellTemplate>
-                    <DataTemplate>
-                      <ui:SymbolIcon Symbol="LockClosed16" FontSize="13" Foreground="{DynamicResource ZiporaTextTertiary}" Visibility="{Binding EncryptedIconVisibility}" />
-                    </DataTemplate>
-                  </GridViewColumn.CellTemplate>
-                </GridViewColumn>
-              </GridView>
-            </ListView.View>
-          </ListView>
-          <!-- 压缩包浏览器：左侧目录树 + 当前目录路径。未打开压缩包时完全隐藏。 -->
-          <Border x:Name="ArchiveNavigator" Grid.Row="0" Width="220" Margin="0,2,0,0" HorizontalAlignment="Left" Visibility="Collapsed" Background="{DynamicResource ZiporaSidebarBackground}" BorderBrush="{DynamicResource ZiporaDividerBrush}" BorderThickness="0,0,1,0">
-            <Grid Margin="10,8,8,8">
-              <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-              </Grid.RowDefinitions>
-              <TextBlock Text="目录" FontWeight="SemiBold" FontSize="12" Foreground="{DynamicResource ZiporaTextSecondary}" Margin="4,0,0,8" />
-              <TreeView x:Name="DirectoryTree" Grid.Row="1" Background="Transparent" Foreground="{DynamicResource ZiporaTextPrimary}" BorderThickness="0" SelectedItemChanged="DirectoryTree_SelectedItemChanged" PreviewMouseLeftButtonDown="DirectoryTree_PreviewMouseLeftButtonDown" PreviewMouseMove="DirectoryTree_PreviewMouseMove" PreviewMouseLeftButtonUp="DirectoryTree_PreviewMouseLeftButtonUp">
-                <TreeView.ItemTemplate>
-                  <HierarchicalDataTemplate ItemsSource="{Binding Children}">
-                    <StackPanel Orientation="Horizontal" Margin="1,3">
-                      <ui:SymbolIcon Symbol="Folder24" FontSize="16" Margin="0,0,6,0" Foreground="{DynamicResource ZiporaAccentBrush}" />
-                      <TextBlock Text="{Binding Name}" VerticalAlignment="Center" Foreground="{DynamicResource ZiporaTextPrimary}" TextTrimming="CharacterEllipsis" MaxWidth="160" />
+<ui:FluentWindow x:Class="Zipora.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:behaviors="clr-namespace:Zipora.Behaviors"
+        Title="Zipora" Icon="pack://application:,,,/Zipora;component/Assets/Zipora.png" Height="640" Width="960"
+        MinHeight="480" MinWidth="720"
+        ExtendsContentIntoTitleBar="True"
+        Background="{DynamicResource ZiporaWindowSurface}"
+        WindowCornerPreference="Round"
+        AllowDrop="True" Drop="Window_Drop" DragOver="Window_DragOver" DragEnter="Window_DragOver"
+        FontFamily="Microsoft YaHei UI" FontSize="13"
+        TextOptions.TextRenderingMode="ClearType">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 拖出压缩包内容时显示紧贴鼠标的小图标；不遮挡目标窗口。 -->
+        <Popup x:Name="DragPreviewPopup" Placement="MousePoint" PlacementTarget="{Binding ElementName=FileList}" StaysOpen="True"
+               AllowsTransparency="True" IsHitTestVisible="False" PopupAnimation="Fade">
+            <Border Background="{DynamicResource ZiporaFlyoutBackground}" BorderBrush="{DynamicResource ZiporaCardBorder}"
+                    Width="34" Height="34" BorderThickness="1" CornerRadius="6" Opacity="0.94">
+                <ui:SymbolIcon x:Name="DragPreviewIcon" Symbol="Document20" FontSize="19"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Foreground="{DynamicResource ZiporaAccentBrush}"/>
+            </Border>
+        </Popup>
+
+        <!-- 自定义背景：仅作最底层视觉，不参与命中测试。 -->
+        <Image x:Name="CustomBackgroundImage" Grid.RowSpan="3"
+               Stretch="UniformToFill" Opacity="0.9"
+               Visibility="Collapsed" IsHitTestVisible="False"/>
+
+        <!-- ========== 自绘标题栏（延伸到客户区） ========== -->
+        <ui:TitleBar x:Name="TitleBar" Grid.Row="0" Title="Zipora" ShowMaximize="True" ShowMinimize="True">
+            <ui:TitleBar.Header>
+                <!-- 由 TitleBar 负责高度，内容始终与右侧窗口控制按钮同一垂直中线。 -->
+                <Grid Margin="8,0,0,0">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Image Source="pack://application:,,,/Zipora;component/Assets/Zipora.png" Width="24" Height="24"
+                               Margin="0,0,6,0" VerticalAlignment="Center"
+                               SnapsToDevicePixels="True"/>
+                        <TextBlock Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource ZiporaTextPrimary}"/>
                     </StackPanel>
-                  </HierarchicalDataTemplate>
-                </TreeView.ItemTemplate>
-                <TreeView.ItemContainerStyle>
-                  <Style TargetType="TreeViewItem" BasedOn="{StaticResource ArchiveTreeItem}">
-                    <Setter Property="IsExpanded" Value="{Binding IsExpanded}" />
-                    <Setter Property="Foreground" Value="{DynamicResource ZiporaTextPrimary}" />
-                  </Style>
-                </TreeView.ItemContainerStyle>
-              </TreeView>
-            </Grid>
-          </Border>
-          <Border x:Name="CurrentDirectoryBar" Grid.Row="0" Height="32" Margin="228,2,0,0" VerticalAlignment="Top" Visibility="Collapsed" Background="{DynamicResource ZiporaBreadcrumbBackground}" BorderBrush="{DynamicResource ZiporaDividerBrush}" BorderThickness="0,0,0,1">
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0">
-              <ui:Button x:Name="NavigateUpButton" Appearance="Transparent" Padding="6,3" Click="NavigateUp_Click" ToolTip="返回上一级">
-                <ui:SymbolIcon Symbol="ChevronLeft20" FontSize="16" />
-              </ui:Button>
-              <TextBlock x:Name="CurrentDirectoryText" Margin="6,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource ZiporaTextSecondary}" />
-            </StackPanel>
-          </Border>
-          <!-- 骨架屏（读取目录期间） -->
-          <ItemsControl x:Name="SkeletonOverlay" Grid.Row="0" Background="Transparent" Visibility="Collapsed" IsHitTestVisible="False">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate>
-                <Grid Margin="12,9">
-                  <StackPanel Orientation="Horizontal">
-                    <Border Width="18" Height="18" CornerRadius="4" Background="{DynamicResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center" />
-                    <Border Style="{StaticResource Skeleton}" Width="200" Height="10" Margin="12,0,0,0" />
-                    <Border Style="{StaticResource Skeleton}" Width="56" Height="10" Margin="36,0,0,0" />
-                    <Border Style="{StaticResource Skeleton}" Width="56" Height="10" Margin="36,0,0,0" />
-                  </StackPanel>
-                  <!-- 流光覆盖层 -->
-                  <Border Background="{DynamicResource ZiporaSkeletonShimmerBrush}" CornerRadius="4" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Opacity="0.35" IsHitTestVisible="False">
-                    <Border.Triggers>
-                      <EventTrigger RoutedEvent="Loaded">
-                        <BeginStoryboard>
-                          <Storyboard RepeatBehavior="Forever">
-                            <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" From="-200" To="0" Duration="0:0:1.4" EasingFunction="{StaticResource EaseInOut}" />
-                          </Storyboard>
-                        </BeginStoryboard>
-                      </EventTrigger>
-                    </Border.Triggers>
-                    <Border.RenderTransform>
-                      <TranslateTransform />
-                    </Border.RenderTransform>
-                  </Border>
                 </Grid>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-          <!-- 空态引导卡片 -->
-          <Border x:Name="EmptyState" Grid.Row="0" Background="Transparent">
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24">
-              <Border Width="88" Height="88" CornerRadius="24" HorizontalAlignment="Center" Background="{DynamicResource ZiporaEmptyBadgeBackground}" BorderBrush="{DynamicResource ZiporaCardBorder}" BorderThickness="1" Margin="0,0,0,22">
-                <ui:SymbolIcon Symbol="Archive24" FontSize="42" Foreground="{DynamicResource ZiporaAccentText}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-              </Border>
-              <TextBlock Text="打开压缩包" FontSize="23" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,0,0,9" Foreground="{DynamicResource ZiporaTextPrimary}" />
-              <TextBlock Text="拖入压缩包，或选择文件开始浏览与解压" FontSize="13" HorizontalAlignment="Center" Foreground="{DynamicResource ZiporaTextSecondary}" />
-              <!-- 单独居中的操作组：避免纵向 StackPanel 让首个按钮偏到左侧。 -->
-              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
-                <ui:Button Appearance="Primary" Padding="16,8" Click="OpenArchive_Click" ToolTip="选择一个压缩包开始浏览">
-                  <StackPanel Orientation="Horizontal">
-                    <ui:SymbolIcon Symbol="FolderOpen20" FontSize="17" Margin="0,0,7,0" />
-                    <TextBlock Text="选择压缩包" />
-                  </StackPanel>
-                </ui:Button>
-                <ui:Button Appearance="Secondary" Padding="16,8" Margin="8,0,0,0" Click="CreateArchive_Click" ToolTip="选择文件或文件夹并创建新的压缩包">
-                  <StackPanel Orientation="Horizontal">
-                    <ui:SymbolIcon Symbol="Add20" FontSize="17" Margin="0,0,7,0" />
-                    <TextBlock Text="创建压缩包" />
-                  </StackPanel>
-                </ui:Button>
-              </StackPanel>
-              <TextBlock Text="7z · ZIP · RAR · TAR 等常见格式" FontSize="12" HorizontalAlignment="Center" Margin="0,18,0,0" Foreground="{DynamicResource ZiporaTextSecondary}" />
-            </StackPanel>
-          </Border>
-          <!-- 框选覆盖层（不拦截鼠标） -->
-          <Canvas x:Name="MarqueeCanvas" Grid.Row="0" Margin="0,2" IsHitTestVisible="False" Visibility="Collapsed">
-            <Border x:Name="MarqueeBox" CornerRadius="2" Background="{DynamicResource AccentFillColorDefaultBrush}" Opacity="0.25" BorderBrush="{DynamicResource AccentFillColorDefaultBrush}" BorderThickness="1" />
-          </Canvas>
+            </ui:TitleBar.Header>
+        </ui:TitleBar>
+
+        <Grid x:Name="RootPanel" Grid.Row="1" Margin="14,4,14,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <!-- 列表必须处于受限的 * 行内，ScrollViewer 才能计算可滚动高度。 -->
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- ========== 工具栏卡片 ========== -->
+            <Border x:Name="ToolbarCard" Grid.Row="0" Style="{StaticResource ToolbarCard}" Padding="8,6" Margin="0,0,0,8"
+                    ClipToBounds="True">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal">
+                        <ui:Button Appearance="Transparent" Padding="12,7" Margin="0,0,6,0"
+                                   Click="OpenArchive_Click" ToolTip="打开压缩包">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="FolderOpen20" FontSize="17" Margin="0,0,7,0"/>
+                                <TextBlock Text="打开"/>
+                            </StackPanel>
+                        </ui:Button>
+                        <ui:Button Appearance="Transparent" Padding="12,7" Margin="0,0,6,0"
+                                   Click="CreateArchive_Click" ToolTip="新建压缩包">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Add20" FontSize="17" Margin="0,0,7,0"/>
+                                <TextBlock Text="新建"/>
+                            </StackPanel>
+                        </ui:Button>
+                        <ui:Button x:Name="ExtractButton" Visibility="Collapsed"
+                                   Appearance="Primary" Padding="12,7" Margin="0,0,6,0"
+                                   Click="Extract_Click" ToolTip="将整个压缩包解压到指定文件夹">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Archive20" FontSize="17" Margin="0,0,7,0"/>
+                                <TextBlock Text="解压到…"/>
+                            </StackPanel>
+                        </ui:Button>
+                        <ui:Button x:Name="DetailsButton" Visibility="Collapsed"
+                                   Appearance="Secondary" Padding="12,7" Margin="6,0,0,0"
+                                   Click="ArchiveDetails_Click" ToolTip="查看压缩包的格式、结构、安全与内容统计">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Info20" FontSize="17" Margin="0,0,7,0"/>
+                                <TextBlock Text="详细信息"/>
+                            </StackPanel>
+                        </ui:Button>
+                        <ui:Button x:Name="IntegrityButton" Visibility="Collapsed"
+                                   Appearance="Secondary" Padding="12,7" Margin="6,0,0,0"
+                                   Click="TestArchiveIntegrity_Click" ToolTip="全量读取并验证压缩包数据与 CRC">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="CheckmarkCircle20" FontSize="17" Margin="0,0,7,0"/>
+                                <TextBlock Text="校验完整性"/>
+                            </StackPanel>
+                        </ui:Button>
+                    </StackPanel>
+
+
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <ui:Button Appearance="Transparent" Padding="8,6" Margin="0,0,4,0"
+                                   Click="DictionaryCrack_Click" ToolTip="字典破解">
+                            <ui:SymbolIcon Symbol="Key20" FontSize="17" VerticalAlignment="Center"/>
+                        </ui:Button>
+                        <ui:Button Appearance="Transparent" Padding="8,6" Margin="0,0,4,0"
+                                   Click="CloudSearch_Click" ToolTip="云端搜索">
+                            <ui:SymbolIcon Symbol="Cloud20" FontSize="17" VerticalAlignment="Center"/>
+                        </ui:Button>
+                        <ui:Button x:Name="MoreButton" Appearance="Transparent" Padding="8,6"
+                                   Click="MoreButton_Click" ToolTip="更多"
+                                   ContextMenuService.Placement="Bottom">
+                            <ui:SymbolIcon Symbol="MoreHorizontal20" FontSize="17" VerticalAlignment="Center"/>
+                            <ui:Button.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="设置" Click="Settings_Click">
+                                        <MenuItem.Icon>
+                                            <ui:SymbolIcon Symbol="Settings20"/>
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="检查更新" Click="CheckUpdate_Click">
+                                        <MenuItem.Icon>
+                                            <ui:SymbolIcon Symbol="ArrowSync20"/>
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="关于" Click="About_Click">
+                                        <MenuItem.Icon>
+                                            <ui:SymbolIcon Symbol="Info20"/>
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="鸣谢" Click="Credits_Click">
+                                        <MenuItem.Icon>
+                                            <ui:SymbolIcon Symbol="HatGraduation20"/>
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <Separator/>
+                                    <MenuItem Header="退出" Click="Exit_Click">
+                                        <MenuItem.Icon>
+                                            <ui:SymbolIcon Symbol="Dismiss20"/>
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                </ContextMenu>
+                            </ui:Button.ContextMenu>
+                        </ui:Button>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- ========== 文件列表卡片 ========== -->
+            <Border x:Name="FileListCard" Grid.Row="1" Style="{StaticResource ContentCard}" Padding="0" ClipToBounds="True">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <ListView x:Name="FileList" Grid.Row="0" Margin="0,2"
+                                 Style="{StaticResource FileListView}"
+                                 SelectionMode="Extended"
+                                 HorizontalContentAlignment="Stretch"
+                                 Background="Transparent" BorderThickness="0"
+                                 ItemContainerStyle="{StaticResource FileListItem}"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Visible"
+                                 behaviors:AutoHideScrollBars.Enabled="True"
+                                 VirtualizingPanel.ScrollUnit="Pixel"
+                                 PreviewMouseLeftButtonDown="FileList_PreviewMouseLeftButtonDown"
+                                 PreviewMouseMove="FileList_PreviewMouseMove"
+                                 PreviewMouseLeftButtonUp="FileList_PreviewMouseLeftButtonUp"
+                                 PreviewMouseDoubleClick="FileList_MouseDoubleClick"
+                                 SelectionChanged="FileList_SelectionChanged"
+                                 PreviewKeyDown="FileList_PreviewKeyDown"
+                                 ContextMenuOpening="FileList_ContextMenuOpening"
+                                 AutomationProperties.HelpText="拖到资源管理器即可解压；Ctrl/Shift 多选；Enter 打开；Backspace 返回上级">
+                        <ListView.Resources>
+                            <!-- ListView 内部的 ScrollViewer 通过隐式样式应用自定义模板。 -->
+                            <Style TargetType="ScrollViewer" BasedOn="{StaticResource FileListScrollViewer}"/>
+                        </ListView.Resources>
+                        <ListView.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem x:Name="CtxOpen" Header="打开" Click="CtxOpen_Click">
+                                    <MenuItem.Icon>
+                                        <ui:SymbolIcon Symbol="Open20"/>
+                                    </MenuItem.Icon>
+                                </MenuItem>
+                                <Separator/>
+                                <MenuItem x:Name="CtxExtractCurrent" Header="解压到当前目录"
+                                          Click="CtxExtractCurrent_Click">
+                                    <MenuItem.Icon>
+                                        <ui:SymbolIcon Symbol="Archive20"/>
+                                    </MenuItem.Icon>
+                                </MenuItem>
+                                <MenuItem x:Name="CtxExtractDesktop" Header="解压到桌面"
+                                          Click="CtxExtractDesktop_Click">
+                                    <MenuItem.Icon>
+                                        <ui:SymbolIcon Symbol="Desktop20"/>
+                                    </MenuItem.Icon>
+                                </MenuItem>
+                                <MenuItem x:Name="CtxExtractPick" Header="解压到指定目录…"
+                                          Click="CtxExtractPick_Click">
+                                    <MenuItem.Icon>
+                                        <ui:SymbolIcon Symbol="FolderOpen20"/>
+                                    </MenuItem.Icon>
+                                </MenuItem>
+                            </ContextMenu>
+                        </ListView.ContextMenu>
+                        <ListView.View>
+                            <GridView AllowsColumnReorder="False">
+                                <GridViewColumn Header="名称" Width="480">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,8,0">
+                                                <ui:SymbolIcon Symbol="{Binding TypeIcon}" FontSize="17"
+                                                               Margin="0,0,8,0" VerticalAlignment="Center"
+                                                               ToolTip="{Binding TypeIconText}"/>
+                                                <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                                <ui:SymbolIcon Symbol="LockClosed16" FontSize="12" Margin="6,0,0,0"
+                                                               Foreground="{DynamicResource ZiporaTextTertiary}"
+                                                               Visibility="{Binding EncryptedIconVisibility}"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                <GridViewColumn Header="大小" Width="110"
+                                                DisplayMemberBinding="{Binding SizeText}"/>
+                                <GridViewColumn Header="打包后" Width="110"
+                                                DisplayMemberBinding="{Binding PackedSizeText}"/>
+                                <GridViewColumn Header="加密" Width="60">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <ui:SymbolIcon Symbol="LockClosed16" FontSize="13"
+                                                           Foreground="{DynamicResource ZiporaTextTertiary}"
+                                                           Visibility="{Binding EncryptedIconVisibility}"/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+
+                    <!-- 压缩包浏览器：左侧目录树 + 当前目录路径。未打开压缩包时完全隐藏。 -->
+                    <Border x:Name="ArchiveNavigator" Grid.Row="0" Width="220" Margin="0,2,0,0"
+                            HorizontalAlignment="Left" Visibility="Collapsed"
+                            Background="{DynamicResource ZiporaSidebarBackground}"
+                            BorderBrush="{DynamicResource ZiporaDividerBrush}" BorderThickness="0,0,1,0">
+                        <Grid Margin="10,8,8,8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="目录" FontWeight="SemiBold" FontSize="12"
+                                       Foreground="{DynamicResource ZiporaTextSecondary}" Margin="4,0,0,8"/>
+                            <TreeView x:Name="DirectoryTree" Grid.Row="1" Background="Transparent"
+                                      Foreground="{DynamicResource ZiporaTextPrimary}"
+                                      BorderThickness="0" SelectedItemChanged="DirectoryTree_SelectedItemChanged"
+                                      PreviewMouseLeftButtonDown="DirectoryTree_PreviewMouseLeftButtonDown"
+                                      PreviewMouseMove="DirectoryTree_PreviewMouseMove"
+                                      PreviewMouseLeftButtonUp="DirectoryTree_PreviewMouseLeftButtonUp">
+                                <TreeView.ItemTemplate>
+                                    <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                        <StackPanel Orientation="Horizontal" Margin="1,3">
+                                            <ui:SymbolIcon Symbol="Folder24" FontSize="16" Margin="0,0,6,0"
+                                                           Foreground="{DynamicResource ZiporaAccentBrush}"/>
+                                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource ZiporaTextPrimary}"
+                                                       TextTrimming="CharacterEllipsis" MaxWidth="160"/>
+                                        </StackPanel>
+                                    </HierarchicalDataTemplate>
+                                </TreeView.ItemTemplate>
+                                <TreeView.ItemContainerStyle>
+                                    <Style TargetType="TreeViewItem" BasedOn="{StaticResource ArchiveTreeItem}">
+                                        <Setter Property="IsExpanded" Value="{Binding IsExpanded}"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource ZiporaTextPrimary}"/>
+                                    </Style>
+                                </TreeView.ItemContainerStyle>
+                            </TreeView>
+                        </Grid>
+                    </Border>
+
+                    <Border x:Name="CurrentDirectoryBar" Grid.Row="0" Height="32" Margin="228,2,0,0"
+                            VerticalAlignment="Top" Visibility="Collapsed"
+                            Background="{DynamicResource ZiporaBreadcrumbBackground}"
+                            BorderBrush="{DynamicResource ZiporaDividerBrush}" BorderThickness="0,0,0,1">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0">
+                            <ui:Button x:Name="NavigateUpButton" Appearance="Transparent" Padding="6,3"
+                                       Click="NavigateUp_Click" ToolTip="返回上一级">
+                                <ui:SymbolIcon Symbol="ChevronLeft20" FontSize="16"/>
+                            </ui:Button>
+                            <TextBlock x:Name="CurrentDirectoryText" Margin="6,0,0,0"
+                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                       Foreground="{DynamicResource ZiporaTextSecondary}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 骨架屏（读取目录期间） -->
+                    <ItemsControl x:Name="SkeletonOverlay" Grid.Row="0" Background="Transparent"
+                                  Visibility="Collapsed" IsHitTestVisible="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="12,9">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Border Width="18" Height="18" CornerRadius="4"
+                                                Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                                VerticalAlignment="Center"/>
+                                        <Border Style="{StaticResource Skeleton}" Width="200" Height="10" Margin="12,0,0,0"/>
+                                        <Border Style="{StaticResource Skeleton}" Width="56" Height="10" Margin="36,0,0,0"/>
+                                        <Border Style="{StaticResource Skeleton}" Width="56" Height="10" Margin="36,0,0,0"/>
+                                    </StackPanel>
+                                    <!-- 流光覆盖层 -->
+                                    <Border Background="{DynamicResource ZiporaSkeletonShimmerBrush}" CornerRadius="4"
+                                            HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                                            Opacity="0.35" IsHitTestVisible="False">
+                                        <Border.Triggers>
+                                            <EventTrigger RoutedEvent="Loaded">
+                                                <BeginStoryboard>
+                                                    <Storyboard RepeatBehavior="Forever">
+                                                        <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                                                                         From="-200" To="0" Duration="0:0:1.4"
+                                                                         EasingFunction="{StaticResource EaseInOut}"/>
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </EventTrigger>
+                                        </Border.Triggers>
+                                        <Border.RenderTransform>
+                                            <TranslateTransform/>
+                                        </Border.RenderTransform>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- 空态引导卡片 -->
+                    <Border x:Name="EmptyState" Grid.Row="0" Background="Transparent">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24">
+                            <Border Width="88" Height="88" CornerRadius="24" HorizontalAlignment="Center"
+                                    Background="{DynamicResource ZiporaEmptyBadgeBackground}"
+                                    BorderBrush="{DynamicResource ZiporaCardBorder}" BorderThickness="1" Margin="0,0,0,22">
+                                <ui:SymbolIcon Symbol="Archive24" FontSize="42"
+                                               Foreground="{DynamicResource ZiporaAccentText}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <TextBlock Text="打开压缩包" FontSize="23" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" Margin="0,0,0,9"
+                                       Foreground="{DynamicResource ZiporaTextPrimary}"/>
+                            <TextBlock Text="拖入压缩包，或选择文件开始浏览与解压"
+                                       FontSize="13" HorizontalAlignment="Center"
+                                       Foreground="{DynamicResource ZiporaTextSecondary}"/>
+                            <!-- 单独居中的操作组：避免纵向 StackPanel 让首个按钮偏到左侧。 -->
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
+                                <ui:Button Appearance="Primary" Padding="16,8"
+                                           Click="OpenArchive_Click" ToolTip="选择一个压缩包开始浏览">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="FolderOpen20" FontSize="17" Margin="0,0,7,0"/>
+                                        <TextBlock Text="选择压缩包"/>
+                                    </StackPanel>
+                                </ui:Button>
+                                <ui:Button Appearance="Secondary" Padding="16,8" Margin="8,0,0,0"
+                                           Click="CreateArchive_Click" ToolTip="选择文件或文件夹并创建新的压缩包">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="Add20" FontSize="17" Margin="0,0,7,0"/>
+                                        <TextBlock Text="创建压缩包"/>
+                                    </StackPanel>
+                                </ui:Button>
+                            </StackPanel>
+                            <TextBlock Text="7z · ZIP · RAR · TAR 等常见格式"
+                                       FontSize="12" HorizontalAlignment="Center" Margin="0,18,0,0"
+                                       Foreground="{DynamicResource ZiporaTextSecondary}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 框选覆盖层（不拦截鼠标） -->
+                    <Canvas x:Name="MarqueeCanvas" Grid.Row="0" Margin="0,2" IsHitTestVisible="False" Visibility="Collapsed">
+                        <Border x:Name="MarqueeBox" CornerRadius="2"
+                                Background="{DynamicResource AccentFillColorDefaultBrush}"
+                                Opacity="0.25"
+                                BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
+                                BorderThickness="1"/>
+                    </Canvas>
+                </Grid>
+            </Border>
+
+            <!-- ========== 状态栏 ========== -->
+            <Border x:Name="StatusCard" Grid.Row="2" Style="{StaticResource OverlayCard}" Margin="0,8,0,12" Padding="12,8"
+                    ClipToBounds="True">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <ui:SymbolIcon x:Name="StatusIcon" Grid.Column="0" Symbol="Info20" FontSize="16"
+                                   Foreground="{DynamicResource ZiporaTextSecondary}"
+                                   Margin="0,0,8,0" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="StatusText" Grid.Column="1" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               Foreground="{DynamicResource ZiporaTextSecondary}"
+                               Text="把压缩包拖进窗口，或点「打开」"/>
+                    <ProgressBar x:Name="Progress" Grid.Column="2" Width="180" Height="4"
+                                 VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,10,0"/>
+                    <TextBlock x:Name="ProgressText" Grid.Column="3" VerticalAlignment="Center"
+                               Visibility="Collapsed" Margin="0,0,10,0"
+                               Foreground="{DynamicResource ZiporaTextSecondary}"/>
+                    <ui:Button x:Name="CancelButton" Grid.Column="4" Appearance="Danger" Padding="14,5"
+                               Click="Cancel_Click" Visibility="Collapsed" Content="取消"/>
+                </Grid>
+            </Border>
         </Grid>
-      </Border>
-      <!-- ========== 状态栏 ========== -->
-      <Border x:Name="StatusCard" Grid.Row="2" Style="{StaticResource OverlayCard}" Margin="0,8,0,12" Padding="12,8" ClipToBounds="True">
-        <Grid>
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-          </Grid.ColumnDefinitions>
-          <ui:SymbolIcon x:Name="StatusIcon" Grid.Column="0" Symbol="Info20" FontSize="16" Foreground="{DynamicResource ZiporaTextSecondary}" Margin="0,0,8,0" VerticalAlignment="Center" />
-          <TextBlock x:Name="StatusText" Grid.Column="1" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource ZiporaTextSecondary}" Text="把压缩包拖进窗口，或点「打开」" />
-          <ProgressBar x:Name="Progress" Grid.Column="2" Width="180" Height="4" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,10,0" />
-          <TextBlock x:Name="ProgressText" Grid.Column="3" VerticalAlignment="Center" Visibility="Collapsed" Margin="0,0,10,0" Foreground="{DynamicResource ZiporaTextSecondary}" />
-          <ui:Button x:Name="CancelButton" Grid.Column="4" Appearance="Danger" Padding="14,5" Click="Cancel_Click" Visibility="Collapsed" Content="取消" />
-        </Grid>
-      </Border>
     </Grid>
-  </Grid>
 </ui:FluentWindow>

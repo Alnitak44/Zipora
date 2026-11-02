@@ -35,7 +35,6 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
     /// <summary>命中并点击「用此密码解压」后返回 (压缩包路径, 密码)；直接关闭返回 null。</summary>
     public (string Archive, string Password)? CrackResult { get; private set; }
 
-    private const string BrowseTag = "__browse__";
 
     /// <summary>字典下拉项：文件名 + 右侧大小。</summary>
     private sealed class DictItem
@@ -64,13 +63,6 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
         }
     }
 
-    private sealed class BrowseDictItem
-    {
-        public string Name => "浏览其他字典文件…";
-        public string SizeText => "";
-        public string FilePath => BrowseTag;
-    }
-
     public DictionaryCrackDialog(SevenZipEngine engine, string? prefillArchive = null)
     {
         InitializeComponent();
@@ -90,6 +82,7 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
                 var passItem = new DictItem(Path.Combine(dir, "passwd.txt"));
                 DictBox.Items.Insert(0, passItem);
                 DictBox.SelectedItem = passItem;
+                RefreshDictionaryState();
             }
         }
     }
@@ -97,53 +90,64 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
     /// <summary>扫描程序目录 dictionaries\ 下的内置字典，展开列表可选（右侧显示大小）。</summary>
     private void LoadBuiltinDictionaries()
     {
+        string? previous = SelectedDictPath();
         DictBox.Items.Clear();
-        string dictDir = AppStorage.DictionaryRoot;
         try
         {
-            if (Directory.Exists(dictDir))
-            {
-                foreach (var f in Directory.GetFiles(dictDir, "*.txt")
-                             .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase))
+            if (Directory.Exists(AppStorage.DictionaryRoot))
+                foreach (var path in Directory.GetFiles(AppStorage.DictionaryRoot, "*.txt")
+                             .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
                 {
-                    DictBox.Items.Add(new DictItem(f));
+                    try { DictBox.Items.Add(new DictItem(path)); }
+                    catch (IOException) { }
+                    catch (UnauthorizedAccessException) { }
                 }
-            }
+            if (previous != null && File.Exists(previous) &&
+                !DictBox.Items.OfType<DictItem>().Any(item => string.Equals(item.FilePath, previous, StringComparison.OrdinalIgnoreCase)))
+                DictBox.Items.Add(new DictItem(previous));
         }
-        catch { /* 目录不存在/不可读则只有「浏览其他」 */ }
-
-        DictBox.Items.Add(new BrowseDictItem());
-        if (DictBox.Items.Count > 0)
-            DictBox.SelectedIndex = 0;
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        DictBox.SelectedItem = DictBox.Items.OfType<DictItem>().FirstOrDefault(item =>
+            string.Equals(item.FilePath, previous, StringComparison.OrdinalIgnoreCase));
+        if (DictBox.SelectedItem == null && DictBox.Items.Count > 0) DictBox.SelectedIndex = 0;
+        RefreshDictionaryState();
     }
 
-    private void RefreshDict_Click(object sender, RoutedEventArgs e)
-        => LoadBuiltinDictionaries();
-
-    private void DictBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    private void RefreshDictionaryState()
     {
-        if (DictBox.SelectedItem is not BrowseDictItem) return;
-
-        // 选了「浏览其他」→ 弹出文件选择
-        var dlg = new OpenFileDialog
-        {
-            Title = "选择密码字典文件（每行一个密码）",
-            Filter = "文本文件|*.txt;*.dic;*.dict|所有文件|*.*",
-        };
-        if (dlg.ShowDialog(this) == true)
-        {
-            var custom = new DictItem(dlg.FileName);
-            DictBox.Items.Insert(Math.Max(0, DictBox.Items.Count - 1), custom);
-            DictBox.SelectedItem = custom;
-        }
-        else
-        {
-            // 取消 → 回退到上一项
-            DictBox.SelectedIndex = Math.Max(0, DictBox.Items.Count - 2);
-        }
+        DictBox.IsEnabled = _cts == null && DictBox.Items.Count > 0;
+        DictHint.Visibility = DictBox.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    /// <summary>当前选中的字典文件路径；选中的是「浏览其他」时返回 null。</summary>
+    private void RefreshDict_Click(object sender, RoutedEventArgs e) => LoadBuiltinDictionaries();
+
+    private void BrowseDict_Click(object sender, RoutedEventArgs e)
+    {
+        if (_cts != null) return;
+        try
+        {
+            var dialog = new OpenFileDialog
+            {
+                Title = "选择密码字典文件（每行一个密码）",
+                Filter = "文本文件|*.txt;*.dic;*.dict|所有文件|*.*",
+                CheckFileExists = true,
+            };
+            if (dialog.ShowDialog(this) == true) SelectDictionaryFile(dialog.FileName);
+        }
+        catch (Exception ex) { SetStatus("选择字典失败：" + ex.Message, error: true); }
+    }
+
+    private void SelectDictionaryFile(string path)
+    {
+        var item = DictBox.Items.OfType<DictItem>().FirstOrDefault(existing =>
+            string.Equals(existing.FilePath, path, StringComparison.OrdinalIgnoreCase));
+        if (item == null) { item = new DictItem(path); DictBox.Items.Add(item); }
+        DictBox.SelectedItem = item;
+        RefreshDictionaryState();
+    }
+
+    /// <summary>当前字典路径；没有字典时返回 null，不自动弹文件选择器。</summary>
     private string? SelectedDictPath()
     {
         if (DictBox.SelectedItem is DictItem item)
@@ -213,6 +217,8 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
         StopButton.IsEnabled = true;
         PickArchiveButton.IsEnabled = false;
         RefreshDictButton.IsEnabled = false;
+        BrowseDictButton.IsEnabled = false;
+        DictBox.IsEnabled = false;
         Progress.Maximum = Math.Max(_total, 1);
         Progress.Value = 0;
 
@@ -272,6 +278,8 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
             StopButton.IsEnabled = false;
             PickArchiveButton.IsEnabled = true;
             RefreshDictButton.IsEnabled = true;
+            BrowseDictButton.IsEnabled = true;
+            RefreshDictionaryState();
             if (ct.IsCancellationRequested && _foundPassword == null)
                 SetStatus("已停止。", error: false);
         }
