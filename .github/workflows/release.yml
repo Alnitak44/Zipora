@@ -44,6 +44,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Path security regression failed' }
           dotnet run --project tests/AppearanceUpdateRegression -c Release -- artifacts/appearance-test
           if ($LASTEXITCODE -ne 0) { throw 'Appearance/update/dictionary regression failed' }
+          dotnet run --project tests/UpdateDialogRegression -c Release -- artifacts/update-dialog-test docs/RELEASE_NOTES.md
+          if ($LASTEXITCODE -ne 0) { throw 'Update dialog regression failed' }
           dotnet run --project tests/SelectionGestureRegression -c Release -- artifacts/selection-gesture-test
           if ($LASTEXITCODE -ne 0) { throw 'Selection gesture regression failed' }
           dotnet run --project tests/PortableRegression -c Release -- artifacts/portable-test "$pwd/src/Zipora/7zip/7z.exe"

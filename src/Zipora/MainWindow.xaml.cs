@@ -1898,10 +1898,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     /// <summary>提示有新版本，用户确认后打开官网下载页。</summary>
     private void PromptUpdate(UpdateInfo info)
     {
-        string notes = string.IsNullOrWhiteSpace(info.Notes) ? "" : $"\n\n更新说明：{info.Notes}";
-        var dialog = new NoticeDialog("发现新版本",
-            $"发现 Zipora v{info.LatestVersion}，当前版本为 v{AppInfo.Version}。{notes}\n\n是否前往下载页面？",
-            NoticeKind.Update, "前往下载", "暂不") { Owner = this };
+        var dialog = new UpdateDialog(info) { Owner = this };
         if (dialog.ShowDialog() == true)
             UpdateChecker.OpenDownloadPage(info.DownloadUrl);
     }

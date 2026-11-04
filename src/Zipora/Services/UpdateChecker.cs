@@ -6,7 +6,11 @@ using Zipora.Dialogs;
 namespace Zipora.Services;
 
 public enum UpdateFrequency { EveryLaunch, Daily, Weekly, Fortnightly, Monthly, Never }
-public record UpdateInfo(string LatestVersion, string Notes, string DownloadUrl) { public bool IsNewer { get; init; } }
+public record UpdateInfo(string LatestVersion, string Notes, string DownloadUrl)
+{
+    public bool IsNewer { get; init; }
+    public string ReleaseUrl { get; init; } = "https://github.com/Alnitak44/Zipora/releases/latest";
+}
 public static class UpdateChecker
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(12) };
@@ -41,6 +45,7 @@ public static class UpdateChecker
             string latest = (root.GetProperty("tag_name").GetString() ?? "").TrimStart('v', 'V');
             if (!Version.TryParse(latest, out _)) return null;
             string url = root.GetProperty("html_url").GetString() ?? "https://github.com/Alnitak44/Zipora/releases/latest";
+            string releaseUrl = url;
             string? fallbackZip = null;
             foreach (var asset in root.GetProperty("assets").EnumerateArray())
             {
@@ -56,7 +61,8 @@ public static class UpdateChecker
             }
             url = fallbackZip ?? url;
             string notes = root.TryGetProperty("body", out var body) ? body.GetString() ?? "" : "";
-            return new UpdateInfo(latest, notes.Length > 1800 ? notes[..1800] + "…" : notes, url) { IsNewer = CompareVersions(latest, AppInfo.Version) > 0 };
+            return new UpdateInfo(latest, ReleaseNotesMarkdown.Limit(notes), url)
+            { IsNewer = CompareVersions(latest, AppInfo.Version) > 0, ReleaseUrl = releaseUrl };
     }
     public static async Task CheckWithPromptAsync(Window owner, bool automatic = false)
     {
@@ -68,7 +74,7 @@ public static class UpdateChecker
         if (!owner.IsVisible) return;
         if (info is { IsNewer: true })
         {
-            var dialog = new NoticeDialog("发现新版本", $"Zipora v{info.LatestVersion}，当前 v{AppInfo.Version}。\n\n{info.Notes}\n\n常规版运行安装包覆盖升级；Portable 升级请保留 Data。", NoticeKind.Update, "前往下载", "稍后") { Owner = owner };
+            var dialog = new UpdateDialog(info) { Owner = owner };
             if (dialog.ShowDialog() == true) OpenDownloadPage(info.DownloadUrl);
         }
         else if (!automatic)
