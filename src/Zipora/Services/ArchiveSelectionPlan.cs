@@ -20,9 +20,10 @@ public sealed class ArchiveSelectionPlan
                 IsDir = group.Any(x => x.IsDir || ValidatePath(x.Path).Contains('/')) }).ToList();
 
     public static ArchiveSelectionPlan Create(IReadOnlyList<ArchiveEntry> entries,
-        IReadOnlyList<ArchiveEntry> selected, string? wrapper = null)
+        IReadOnlyList<ArchiveEntry> selected, string? wrapper = null, bool inspectArchive = true)
     {
         if (selected.Count == 0) throw new InvalidOperationException("请先选择要解压的内容。");
+        if (inspectArchive) ArchivePathSecurity.Inspect(entries).ThrowIfUnsafe();
         var all = new Dictionary<string, ArchiveEntry>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in entries)
         {
@@ -102,32 +103,17 @@ public sealed class ArchiveSelectionPlan
 
     public static string ValidatePath(string path)
     {
-        string normalized = path.Replace('\\', '/');
-        if (string.IsNullOrWhiteSpace(normalized) || normalized.StartsWith('/') || Path.IsPathRooted(normalized))
-            throw new InvalidDataException($"压缩包路径无效：{path}");
-        normalized = normalized.TrimEnd('/');
-        foreach (string segment in normalized.Split('/'))
-        {
-            string device = segment.Split('.')[0].ToUpperInvariant();
-            if (segment.Length == 0 || segment is "." or ".." || segment.EndsWith('.') || segment.EndsWith(' ') ||
-                segment.Any(c => c < 32 || "<>:\"|?*".Contains(c)) ||
-                device is "CON" or "PRN" or "AUX" or "NUL" ||
-                (device.Length == 4 && (device.StartsWith("COM") || device.StartsWith("LPT")) && char.IsDigit(device[3])))
-                throw new InvalidDataException($"无法安全解压此 Windows 路径：{path}");
-        }
-        return normalized;
+        try { return ArchivePathSecurity.ValidatePath(path); }
+        catch (InvalidDataException ex) { throw new InvalidDataException($"Zip Slip 安全防护：{ex.Message}（{path}）", ex); }
     }
 
     public static string ResolveInside(string root, string relative)
     {
         string fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        if (Directory.Exists(fullRoot) && (File.GetAttributes(fullRoot) & FileAttributes.ReparsePoint) != 0)
-            throw new InvalidDataException("目标目录不能是链接。");
+        ArchivePathSecurity.EnsureNoReparseAncestors(fullRoot);
         string path = Path.GetFullPath(Path.Combine(fullRoot, ValidatePath(relative).Replace('/', Path.DirectorySeparatorChar)));
         if (!path.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("解压路径越出目标目录。");
-        for (string? current = path; current != null && current.Length >= fullRoot.Length; current = Path.GetDirectoryName(current))
-            if (Path.Exists(current) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
-                throw new InvalidDataException("解压路径包含链接，已停止操作。");
+        ArchivePathSecurity.EnsureNoReparseAncestors(path);
         return path;
     }
 

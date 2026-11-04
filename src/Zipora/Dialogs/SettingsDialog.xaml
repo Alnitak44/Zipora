@@ -181,6 +181,27 @@
                         Background="{DynamicResource ZiporaCardBorder}" VerticalAlignment="Center"/>
             </Grid>
 
+            <!-- Zip Slip 防护 -->
+            <Border Style="{StaticResource Card}" Padding="14" Margin="0,0,0,10">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="Shield20" FontSize="17" Margin="0,0,7,0" Foreground="{DynamicResource ZiporaTextSecondary}" VerticalAlignment="Center"/>
+                            <TextBlock Text="Zip Slip 防护" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Border Width="20" Height="20" Margin="8,0,0,0" Background="Transparent" Cursor="Help" Focusable="True"
+                                    AutomationProperties.Name="Zip Slip 防护说明" ToolTipService.InitialShowDelay="250">
+                                <Border.ToolTip><ToolTip Padding="12,9"><TextBlock MaxWidth="300" TextWrapping="Wrap" Style="{StaticResource SecondaryText}" FontSize="12"
+                                    Text="打开压缩包前自动检查路径穿越、危险链接及路径冲突；解压时再次检查。此功能不等同于病毒扫描。"/></ToolTip></Border.ToolTip>
+                                <ui:SymbolIcon Symbol="Info20" FontSize="14" Foreground="{DynamicResource ZiporaTextSecondary}"/>
+                            </Border>
+                        </StackPanel>
+                        <ui:ToggleSwitch x:Name="ZipSlipProtectionBox" Margin="0,10,0,0"
+                                         Checked="ZipSlipProtection_Changed" Unchecked="ZipSlipProtection_Changed">
+                            <ui:ToggleSwitch.OffContent><TextBlock Text="启用 Zip Slip 防护"/></ui:ToggleSwitch.OffContent>
+                            <ui:ToggleSwitch.OnContent><TextBlock Text="启用 Zip Slip 防护"/></ui:ToggleSwitch.OnContent>
+                        </ui:ToggleSwitch>
+                    </StackPanel>
+            </Border>
+
             <!-- 压缩炸弹防护 -->
             <Border Style="{StaticResource Card}" Padding="14" Margin="0,0,0,10">
                 <StackPanel>
@@ -216,25 +237,15 @@
             </Border>
 
             <!-- 系统集成卡片 -->
-            <Border Style="{StaticResource Card}" Padding="14" Margin="0,0,0,10">
+            <Border x:Name="ContextMenuCard" Style="{StaticResource Card}" Padding="14" Margin="0,0,0,10"
+                    ToolTipService.InitialShowDelay="250" ToolTipService.ShowDuration="30000">
                 <StackPanel>
                     <StackPanel Orientation="Horizontal">
                         <ui:SymbolIcon Symbol="WindowApps20" FontSize="17" Margin="0,0,7,0"
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                        VerticalAlignment="Center"/>
                         <TextBlock Text="系统右键菜单" FontWeight="SemiBold" VerticalAlignment="Center"/>
-<Border Margin="8,0,0,0" Width="20" Height="20" Background="Transparent"
-                          VerticalAlignment="Center" Cursor="Help" Focusable="True"
-                          AutomationProperties.Name="系统右键菜单说明"
-                          ToolTipService.InitialShowDelay="250" ToolTipService.ShowDuration="30000">
-                        <Border.ToolTip>
-                            <ToolTip Padding="12,9"><TextBlock Text="开启后，在资源管理器中右键压缩包会出现「用 Zipora 解压」子菜单。Windows 11 需点击「显示更多选项」查看。"
-                               TextWrapping="Wrap" Style="{StaticResource SecondaryText}" MaxWidth="300" FontSize="12"
-                              /></ToolTip>
-                        </Border.ToolTip>
-                        <ui:SymbolIcon Symbol="Info20" FontSize="14"
-                                       Foreground="{DynamicResource ZiporaTextSecondary}" VerticalAlignment="Center"/>
-                    </Border>
+
                     </StackPanel>
                     <ui:ToggleSwitch x:Name="ContextMenuBox" Margin="0,10,0,0"
                                      Checked="ContextMenuBox_Changed" Unchecked="ContextMenuBox_Changed">
@@ -269,18 +280,7 @@
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                        VerticalAlignment="Center"/>
                         <TextBlock Text="密码管理" FontWeight="SemiBold" VerticalAlignment="Center"/>
-<Border Margin="8,0,0,0" Width="20" Height="20" Background="Transparent"
-                          VerticalAlignment="Center" Cursor="Help" Focusable="True"
-                          AutomationProperties.Name="密码管理说明"
-                          ToolTipService.InitialShowDelay="250" ToolTipService.ShowDuration="30000">
-                        <Border.ToolTip>
-                            <ToolTip Padding="12,9"><TextBlock x:Name="PasswordStorageText" Text="保存最多 10 个常用密码，在解压或新建压缩包时可快速填入。列表显示完整密码，本地存储使用当前 Windows 用户加密保护。"
-                               TextWrapping="Wrap" Style="{StaticResource SecondaryText}" MaxWidth="300" FontSize="12"
-                              /></ToolTip>
-                        </Border.ToolTip>
-                        <ui:SymbolIcon Symbol="Info20" FontSize="14"
-                                       Foreground="{DynamicResource ZiporaTextSecondary}" VerticalAlignment="Center"/>
-                    </Border>
+
                     </StackPanel>
                     <ui:Button Grid.Column="1" Content="管理密码…" Style="{StaticResource DialogSecondaryButton}"
                                Width="112" Height="34" Padding="12,0" Margin="12,0,0,0"
@@ -295,18 +295,7 @@
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                        VerticalAlignment="Center"/>
                         <TextBlock Text="密码上传" FontWeight="SemiBold" VerticalAlignment="Center"/>
-<Border Margin="8,0,0,0" Width="20" Height="20" Background="Transparent"
-                          VerticalAlignment="Center" Cursor="Help" Focusable="True"
-                          AutomationProperties.Name="密码上传说明"
-                          ToolTipService.InitialShowDelay="250" ToolTipService.ShowDuration="30000">
-                        <Border.ToolTip>
-                            <ToolTip Padding="12,9"><TextBlock Text="把密码匿名贡献到云端密码库，供他人查询。关闭后仅影响自动上传，手动查询不受影响。"
-                               TextWrapping="Wrap" Style="{StaticResource SecondaryText}" MaxWidth="300" FontSize="12"
-                              /></ToolTip>
-                        </Border.ToolTip>
-                        <ui:SymbolIcon Symbol="Info20" FontSize="14"
-                                       Foreground="{DynamicResource ZiporaTextSecondary}" VerticalAlignment="Center"/>
-                    </Border>
+
                     </StackPanel>
                     <ui:ToggleSwitch x:Name="ExtractUploadBox" Margin="0,10,0,0"
                                      Checked="Contribute_Changed" Unchecked="Contribute_Changed">

@@ -15,11 +15,19 @@ public partial class NoticeDialog : FluentWindow
         bool primaryIsDanger = false)
     {
         InitializeComponent();
+        MessageScroller.MaxHeight = Math.Min(360, Math.Max(80, SystemParameters.WorkArea.Height * 0.45));
         Title = title;
         DialogTitle.Title = title;
         HeadlineText.Text = title;
         MessageText.Text = message;
         PrimaryButton.Content = primaryText;
+        PrimaryButton.IsDefault = !primaryIsDanger;
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key != System.Windows.Input.Key.Escape) return;
+            DialogResult = false;
+            e.Handled = true;
+        };
         if (primaryIsDanger)
         {
             PrimaryButton.Appearance = ControlAppearance.Danger;

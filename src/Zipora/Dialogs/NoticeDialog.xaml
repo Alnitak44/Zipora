@@ -3,35 +3,41 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="Zipora" Icon="pack://application:,,,/Zipora;component/Assets/Zipora.png"
-        Width="440" SizeToContent="Height" WindowStartupLocation="CenterOwner"
+        Width="460" MinWidth="0" MinHeight="0" SizeToContent="Height" WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize" ShowInTaskbar="False" ExtendsContentIntoTitleBar="True"
         Background="{DynamicResource ZiporaWindowSurface}"
         WindowCornerPreference="Round"
         FontFamily="Microsoft YaHei UI" FontSize="13">
     <Grid Margin="16">
-        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <ui:TitleBar Grid.Row="0" x:Name="DialogTitle" Title="Zipora" ShowMaximize="False" ShowMinimize="False"
                      FontSize="16" FontWeight="SemiBold"/>
         <Border Grid.Row="1" Style="{StaticResource Card}" Padding="22" Margin="0,8,0,0">
-            <StackPanel>
-                <StackPanel Orientation="Horizontal">
+            <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="56"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <Border Width="42" Height="42" CornerRadius="12" Background="{DynamicResource ControlFillColorSecondaryBrush}"
                             Margin="0,0,14,0">
                         <ui:SymbolIcon x:Name="NoticeIcon" Symbol="Info20" FontSize="24" VerticalAlignment="Center"
                                        HorizontalAlignment="Center"/>
                     </Border>
-                    <TextBlock x:Name="HeadlineText" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center"
+                    <TextBlock x:Name="HeadlineText" Grid.Column="1" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center"
                                TextWrapping="Wrap"/>
-                </StackPanel>
-                <TextBlock x:Name="MessageText" Margin="56,12,0,18" TextWrapping="Wrap" LineHeight="20"
-                           Foreground="{DynamicResource ZiporaTextSecondary}"/>
-                <Grid>
+                </Grid>
+                <ScrollViewer x:Name="MessageScroller" Grid.Row="1" Margin="56,12,0,20" MaxHeight="360"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <TextBlock x:Name="MessageText" TextWrapping="Wrap" LineHeight="20"
+                               Foreground="{DynamicResource ZiporaTextSecondary}"/>
+                </ScrollViewer>
+                <Grid Grid.Row="2">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <ui:Button x:Name="SecondaryButton" Grid.Column="1" Appearance="Secondary" Margin="0,0,8,0"
+                               MinWidth="80" Height="32" Padding="14,0" IsCancel="True"
                                Click="Secondary_Click" Visibility="Collapsed"/>
-                    <ui:Button x:Name="PrimaryButton" Grid.Column="2" Appearance="Primary" Click="Primary_Click"/>
+                    <ui:Button x:Name="PrimaryButton" Grid.Column="2" Appearance="Primary" MinWidth="80" Height="32" Padding="14,0" Click="Primary_Click"/>
                 </Grid>
-            </StackPanel>
+            </Grid>
         </Border>
     </Grid>
 </ui:FluentWindow>

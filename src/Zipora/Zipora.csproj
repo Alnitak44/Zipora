@@ -9,7 +9,7 @@
     <RootNamespace>Zipora</RootNamespace>
     <AssemblyName>Zipora</AssemblyName>
     <ApplicationIcon>Assets\Zipora.ico</ApplicationIcon>
-    <Version>2.0.39</Version>
+    <Version>2.0.47</Version>
     <Product>Zipora</Product>
     <Description>套壳 7-Zip 的解压工具，集成 KeyFetch 云端压缩包密码查询/共享</Description>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>

@@ -19,6 +19,7 @@ public partial class SettingsDialog : FluentWindow
     }
 
     private bool _busy;
+    private bool _protectionPromptOpen;
     private bool _suppressEvents; // 初始化/刷新状态时不触发注册表操作
 
     public SettingsDialog()
@@ -33,13 +34,13 @@ public partial class SettingsDialog : FluentWindow
             RefreshUpdateState();
             RefreshContributeState();
             RefreshArchiveBombProtectionState();
+            RefreshZipSlipProtectionState();
         };
         Backdrop.ApplyFromSetting(this);
         if (AppStorage.IsPortable)
         {
             PortableInfoCard.Visibility = Visibility.Visible;
             PortableInfoText.Text = $"数据目录：{AppStorage.DataRoot}\n设置、密码库、背景图与临时文件均在此目录。退出后再安全弹出 U 盘；不要在运行中拔盘。右键菜单集成在便携版中禁用。FAT32 单文件上限约 4 GiB，大文件请分卷或使用 exFAT / NTFS。";
-            PasswordStorageText.Text = "最多保存 10 个常用密码。密码库使用主密码加密，换电脑仍可解锁；主密码不会保存在 U 盘。";
         }
     }
 
@@ -213,61 +214,76 @@ public partial class SettingsDialog : FluentWindow
         _suppressEvents = false;
     }
 
-    private async void ArchiveBombProtection_Changed(object sender, RoutedEventArgs e)
+    private void RefreshZipSlipProtectionState()
     {
-        if (_suppressEvents) return;
-
-        if (ArchiveBombProtectionBox.IsChecked == true)
-        {
-            SaveArchiveBombProtection(enabled: true);
-            return;
-        }
-
-        // ToggleSwitch 的 Unchecked 事件发生在控件切换过程中。等本次输入事件结束后，
-        // 先无条件恢复为开启；只有用户明确点击「仍然关闭」才提交关闭状态。
-        await Dispatcher.InvokeAsync(
-            () => { }, System.Windows.Threading.DispatcherPriority.Background);
-        SetArchiveBombProtectionToggle(enabled: true);
-        if (!IsVisible)
-        {
-            SaveArchiveBombProtection(enabled: true);
-            return;
-        }
-
-        var dialog = new NoticeDialog(
-            "关闭压缩炸弹防护？",
-            "关闭后，Zipora 将不再提醒异常膨胀的压缩包，也不会在所选内容解压前阻止磁盘空间耗尽。恶意压缩包可能导致磁盘写满或系统失去响应。",
-            NoticeKind.Warning,
-            "仍然关闭", "保持开启", primaryIsDanger: true)
-        { Owner = this };
-
-        if (dialog.ShowDialog() != true)
-        {
-            // 包括点击「保持开启」、标题栏关闭按钮和 Alt+F4。
-            SaveArchiveBombProtection(enabled: true);
-            return;
-        }
-
-        SetArchiveBombProtectionToggle(enabled: false);
-        SaveArchiveBombProtection(enabled: false);
+        SetZipSlipProtectionToggle(AuthStore.Load().ZipSlipProtectionEnabled);
     }
 
-    private void SetArchiveBombProtectionToggle(bool enabled)
+    private async void ZipSlipProtection_Changed(object sender, RoutedEventArgs e)
+        => await ChangeProtectionAsync(zipSlip: true);
+
+    private async void ArchiveBombProtection_Changed(object sender, RoutedEventArgs e)
+        => await ChangeProtectionAsync(zipSlip: false);
+
+    private async Task ChangeProtectionAsync(bool zipSlip)
+    {
+        if (_suppressEvents) return;
+        var toggle = zipSlip ? ZipSlipProtectionBox : ArchiveBombProtectionBox;
+        if (_protectionPromptOpen) { SetProtectionToggle(zipSlip, true); return; }
+        if (toggle.IsChecked == true) { SaveProtectionPreference(true, zipSlip); return; }
+
+        _protectionPromptOpen = true;
+        try
+        {
+            // Leave the ToggleSwitch event before restoring state and showing a modal.
+            await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+            SetProtectionToggle(zipSlip, true);
+            if (!IsVisible) { SaveProtectionPreference(true, zipSlip); return; }
+            var dialog = new NoticeDialog(zipSlip ? "关闭 Zip Slip 防护？" : "关闭压缩炸弹防护？",
+                zipSlip
+                    ? "关闭后，打开压缩包时不再自动检测危险路径和链接，提取时也会跳过额外安全预检。恶意压缩包可能把文件写入目标目录之外或覆盖其他文件。"
+                    : "关闭后，Zipora 将不再提醒异常膨胀的压缩包，也不会在所选内容解压前阻止磁盘空间耗尽。恶意压缩包可能导致磁盘写满或系统失去响应。",
+                NoticeKind.Warning, "仍然关闭", "保持开启", primaryIsDanger: true) { Owner = this };
+            bool enabled = dialog.ShowDialog() != true;
+            SetProtectionToggle(zipSlip, enabled);
+            SaveProtectionPreference(enabled, zipSlip);
+        }
+        finally { _protectionPromptOpen = false; }
+    }
+
+    private void SetProtectionToggle(bool zipSlip, bool enabled)
     {
         _suppressEvents = true;
-        ArchiveBombProtectionBox.IsChecked = enabled;
+        (zipSlip ? ZipSlipProtectionBox : ArchiveBombProtectionBox).IsChecked = enabled;
         _suppressEvents = false;
     }
 
-    private static void SaveArchiveBombProtection(bool enabled)
-    {
-        var store = AuthStore.Load();
-        store.ArchiveBombProtectionEnabled = enabled;
-        store.Save();
-        if (Application.Current.MainWindow is Zipora.MainWindow main)
-            main.SetArchiveBombProtection(enabled);
-    }
+    private void SetZipSlipProtectionToggle(bool enabled) => SetProtectionToggle(true, enabled);
 
+    private static void SaveProtectionPreference(bool enabled, bool zipSlip)
+    {
+        // Apply the confirmed choice in memory even when removable storage becomes
+        // read-only/disconnected. A failed write must not crash an async UI handler.
+        if (Application.Current.MainWindow is Zipora.MainWindow main)
+        {
+            if (zipSlip) main.SetZipSlipProtection(enabled);
+            else main.SetArchiveBombProtection(enabled);
+        }
+        try
+        {
+            var store = AuthStore.Load();
+            if (zipSlip) store.ZipSlipProtectionEnabled = enabled;
+            else store.ArchiveBombProtectionEnabled = enabled;
+            store.Save();
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            AppStorage.Log("Protection preference save failed: " + ex);
+            if (AppStorage.IsPortable) AppStorage.ReportSaveFailure(ex);
+            else System.Windows.MessageBox.Show("设置已在本次会话生效，但未能保存。请检查目录权限和可用空间。\n\n" + ex.Message,
+                "设置未保存", System.Windows.MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
     private void Backdrop_Changed(object sender, RoutedEventArgs e)
     {
         if (_suppressEvents) return;
@@ -296,7 +312,9 @@ public partial class SettingsDialog : FluentWindow
         _suppressEvents = true;
         ContextMenuBox.IsChecked = !AppStorage.IsPortable && ContextMenuInstaller.IsInstalled();
         ContextMenuBox.IsEnabled = !AppStorage.IsPortable;
-        if (AppStorage.IsPortable) ContextMenuBox.ToolTip = "便携版不修改本机注册表。";
+        // Keep the tooltip owner enabled: the disabled ToggleSwitch's template can
+        // remove its content from hit testing, so ShowOnDisabled alone is insufficient.
+        ContextMenuCard.ToolTip = AppStorage.IsPortable ? "Portable版无法使用此功能" : null;
         _suppressEvents = false;
         OpStatusPanel.Visibility = Visibility.Collapsed;
     }

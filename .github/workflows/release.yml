@@ -40,8 +40,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Output path regression failed' }
           dotnet run --project tests/ExtractionRegression -c Release -- artifacts/extraction-test "$pwd/src/Zipora/7zip/7z.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Extraction regression failed' }
+          dotnet run --project tests/PathSecurityRegression -c Release -- artifacts/path-security-test "$pwd/src/Zipora/7zip/7z.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Path security regression failed' }
           dotnet run --project tests/AppearanceUpdateRegression -c Release -- artifacts/appearance-test
           if ($LASTEXITCODE -ne 0) { throw 'Appearance/update/dictionary regression failed' }
+          dotnet run --project tests/SelectionGestureRegression -c Release -- artifacts/selection-gesture-test
+          if ($LASTEXITCODE -ne 0) { throw 'Selection gesture regression failed' }
+          dotnet run --project tests/PortableRegression -c Release -- artifacts/portable-test "$pwd/src/Zipora/7zip/7z.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Portable regression failed' }
+          dotnet run --project tests/VisualStateRegression -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Visual state regression failed' }
       - name: Locate Inno Setup
         shell: pwsh
         run: |

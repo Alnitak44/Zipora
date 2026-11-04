@@ -33,6 +33,7 @@ internal static class Program
         {
             Expect(AppStorage.IsPortable, "portable storage initialized");
             var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+            SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
             var xml = System.Xml.Linq.XDocument.Load(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../src/Zipora/App.xaml")));
             System.Xml.Linq.XNamespace ns = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
             var resources = xml.Root!.Element(ns + "Application.Resources")!.Elements().Single();
@@ -119,6 +120,7 @@ internal static class Program
                 settings.Close();
             }, DispatcherPriority.ApplicationIdle);
             settings.ShowDialog();
+            CheckDialogsAndProtection(main);
             var engine = new SevenZipEngine(Path.Combine(AppContext.BaseDirectory, "7zip", "7z.exe"));
             var dictionary = new DictionaryCrackDialog(engine) { Owner = main };
             var dictionaryBox = (System.Windows.Controls.ComboBox)dictionary.FindName("DictBox");
@@ -160,5 +162,94 @@ internal static class Program
             app.Shutdown(0);
         }
         finally { AppStorage.Dispose(); }
+    }
+
+    private static void CheckDialogsAndProtection(Zipora.MainWindow main)
+    {
+        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+        var notice = new NoticeDialog("提示", "简短说明", NoticeKind.Info) { Owner = main };
+        notice.Loaded += (_, _) => notice.Dispatcher.BeginInvoke(() =>
+        {
+            Expect(((System.Windows.Controls.Button)notice.FindName("PrimaryButton")).IsDefault, "normal notice has Enter default");
+            SendEscape(notice);
+        }, DispatcherPriority.ApplicationIdle);
+        Expect(notice.ShowDialog() == false, "Esc dismisses a single-button notice");
+        var danger = new NoticeDialog("确认", string.Join("\n", Enumerable.Repeat("长说明", 80)), NoticeKind.Warning,
+            "仍然关闭", "保持开启", primaryIsDanger: true) { Owner = main };
+        danger.Loaded += (_, _) => danger.Dispatcher.BeginInvoke(() =>
+        {
+            var primary = (System.Windows.Controls.Button)danger.FindName("PrimaryButton");
+            var secondary = (System.Windows.Controls.Button)danger.FindName("SecondaryButton");
+            Expect(!primary.IsDefault && secondary.IsDefault && secondary.IsCancel, "danger confirmation defaults to the safe action");
+            Expect(primary.TranslatePoint(new Point(0, primary.ActualHeight), danger).Y <= danger.ActualHeight, "long notice keeps footer visible");
+            SendEscape(danger);
+        }, DispatcherPriority.ApplicationIdle);
+        Expect(danger.ShowDialog() == false, "Esc never accepts a dangerous action");
+
+        var settings = new SettingsDialog { Owner = main, ShowActivated = false };
+        settings.Show(); settings.UpdateLayout();
+        var card = (System.Windows.Controls.Border)settings.FindName("ContextMenuCard");
+        var context = (Wpf.Ui.Controls.ToggleSwitch)settings.FindName("ContextMenuBox");
+        Expect(!context.IsEnabled && card.IsEnabled && card.ToolTip?.ToString() == "Portable版无法使用此功能", "Portable tooltip belongs to an enabled card");
+        var zipSlip = (Wpf.Ui.Controls.ToggleSwitch)settings.FindName("ZipSlipProtectionBox");
+        var bomb = (Wpf.Ui.Controls.ToggleSwitch)settings.FindName("ArchiveBombProtectionBox");
+        foreach (var toggle in new[] { zipSlip, bomb })
+        {
+            RespondToToggle(settings, toggle, accept: false);
+            Expect(toggle.IsChecked == true, "canceling a protection prompt preserves enabled state");
+            RespondToToggle(settings, toggle, accept: true);
+            Expect(toggle.IsChecked == false, "explicit confirmation disables protection");
+            toggle.IsChecked = true;
+            Expect(toggle.IsChecked == true, "protection can be immediately re-enabled");
+        }
+        Expect(AuthStore.Load().ZipSlipProtectionEnabled && AuthStore.Load().ArchiveBombProtectionEnabled, "both protection choices persisted");
+        int failures = 0;
+        void Failed(string _) => failures++;
+        AppStorage.SaveFailed += Failed;
+        try
+        {
+            using var locked = new FileStream(AppStorage.DataFile("config.json"), FileMode.Open, FileAccess.Read, FileShare.None);
+            typeof(SettingsDialog).GetMethod("SaveProtectionPreference", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                .Invoke(null, new object[] { false, true });
+            Expect(failures == 1, "failed settings write is reported without an unhandled exception");
+            var engine = (SevenZipEngine)typeof(Zipora.MainWindow).GetField("_engine", flags)!.GetValue(main)!;
+            Expect(!engine.ZipSlipProtectionEnabled, "confirmed setting remains effective for this session after a write failure");
+        }
+        finally { AppStorage.SaveFailed -= Failed; }
+        main.SetZipSlipProtection(true);
+        settings.Close();
+    }
+
+    private static void SendEscape(Window window)
+    {
+        window.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,
+            PresentationSource.FromVisual(window)!, Environment.TickCount, System.Windows.Input.Key.Escape)
+            { RoutedEvent = System.Windows.Input.Keyboard.PreviewKeyDownEvent });
+    }
+
+    private static void RespondToToggle(SettingsDialog settings, Wpf.Ui.Controls.ToggleSwitch toggle, bool accept)
+    {
+        var frame = new DispatcherFrame();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(20) };
+        bool answered = false;
+        timer.Tick += (_, _) =>
+        {
+            var prompt = Application.Current.Windows.OfType<NoticeDialog>().FirstOrDefault();
+            if (prompt != null && !answered)
+            {
+                answered = true;
+                if (accept) ((System.Windows.Controls.Button)prompt.FindName("PrimaryButton"))
+                    .RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                else SendEscape(prompt);
+            }
+            bool pending = (bool)typeof(SettingsDialog).GetField("_protectionPromptOpen",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(settings)!;
+            if ((answered && !pending) || clock.Elapsed.TotalSeconds > 8) frame.Continue = false;
+        };
+        timer.Start();
+        try { toggle.IsChecked = false; Dispatcher.PushFrame(frame); }
+        finally { timer.Stop(); }
+        Expect(answered, "protection confirmation was shown");
     }
 }

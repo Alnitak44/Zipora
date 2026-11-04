@@ -131,11 +131,6 @@
                                             <ui:SymbolIcon Symbol="Settings20"/>
                                         </MenuItem.Icon>
                                     </MenuItem>
-                                    <MenuItem Header="检查更新" Click="CheckUpdate_Click">
-                                        <MenuItem.Icon>
-                                            <ui:SymbolIcon Symbol="ArrowSync20"/>
-                                        </MenuItem.Icon>
-                                    </MenuItem>
                                     <MenuItem Header="关于" Click="About_Click">
                                         <MenuItem.Icon>
                                             <ui:SymbolIcon Symbol="Info20"/>
@@ -184,7 +179,7 @@
                                  SelectionChanged="FileList_SelectionChanged"
                                  PreviewKeyDown="FileList_PreviewKeyDown"
                                  ContextMenuOpening="FileList_ContextMenuOpening"
-                                 AutomationProperties.HelpText="拖到资源管理器即可解压；Ctrl/Shift 多选；Enter 打开；Backspace 返回上级">
+                                 AutomationProperties.HelpText="拖动文件可解压；空白处拖动或按住 Ctrl 从文件上拖动可框选；Ctrl 单击切换选择，Shift 连选；Esc 取消框选">
                         <ListView.Resources>
                             <!-- ListView 内部的 ScrollViewer 通过隐式样式应用自定义模板。 -->
                             <Style TargetType="ScrollViewer" BasedOn="{StaticResource FileListScrollViewer}"/>
@@ -384,7 +379,7 @@
                     </Border>
 
                     <!-- 框选覆盖层（不拦截鼠标） -->
-                    <Canvas x:Name="MarqueeCanvas" Grid.Row="0" Margin="0,2" IsHitTestVisible="False" Visibility="Collapsed">
+                    <Canvas x:Name="MarqueeCanvas" Grid.Row="0" Margin="0,2" IsHitTestVisible="False" ClipToBounds="True" Visibility="Collapsed">
                         <Border x:Name="MarqueeBox" CornerRadius="2"
                                 Background="{DynamicResource AccentFillColorDefaultBrush}"
                                 Opacity="0.25"

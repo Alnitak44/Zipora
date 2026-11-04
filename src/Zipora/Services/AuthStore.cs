@@ -13,6 +13,7 @@ public class AuthStore
     public bool AutoContributePassword { get; set; } = !AppStorage.IsPortable;
     public bool CompressContributePassword { get; set; }
     public bool ArchiveBombProtectionEnabled { get; set; } = true;
+    public bool ZipSlipProtectionEnabled { get; set; } = true;
     public string WindowBackdrop { get; set; } = "Mica";
     public string Theme { get; set; } = "Light";
     public string CustomBackgroundImagePath { get; set; } = "";
@@ -46,6 +47,7 @@ public class AuthStore
                 if (root.TryGetProperty("autoContribute", out autoContribute) && autoContribute.ValueKind == JsonValueKind.False) store.AutoContributePassword = false;
                 if (root.TryGetProperty("compressContribute", out var compress) && compress.ValueKind == JsonValueKind.True) store.CompressContributePassword = true;
                 if (root.TryGetProperty("archiveBombProtection", out var protection) && protection.ValueKind == JsonValueKind.False) store.ArchiveBombProtectionEnabled = false;
+                if (root.TryGetProperty("zipSlipProtection", out var zipSlip) && zipSlip.ValueKind == JsonValueKind.False) store.ZipSlipProtectionEnabled = false;
                 if (root.TryGetProperty("windowBackdrop", out var backdrop)) store.WindowBackdrop = backdrop.GetString() ?? "Mica";
                 if (root.TryGetProperty("theme", out var theme)) store.Theme = theme.GetString() ?? "Light";
                 if (root.TryGetProperty("customBackgroundImage", out var background)) store.CustomBackgroundImagePath = AppStorage.Layout.DecodePath(background.GetString() ?? "");
@@ -78,6 +80,7 @@ public class AuthStore
             autoContribute = AutoContributePassword,
             compressContribute = CompressContributePassword,
             archiveBombProtection = ArchiveBombProtectionEnabled,
+            zipSlipProtection = ZipSlipProtectionEnabled,
             windowBackdrop = WindowBackdrop,
             theme = Theme,
             updateFrequency = UpdateFrequency.ToString(),

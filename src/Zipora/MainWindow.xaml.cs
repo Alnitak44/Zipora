@@ -68,7 +68,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     /// <summary>窗口标题基础部分（带版本号）。</summary>
     private static string BaseTitle => $"Zipora v{AppInfo.Version}";
 
-    // 拖出解压：仅无修饰键、从条目开始并离开窗口后触发，避免与多选手势抢操作。
+    // Plain item drags start OLE at the system threshold; Ctrl drags select.
     private Point _mouseDownPos;
     private bool _dragCandidate;
     private bool _dragThresholdReached;
@@ -85,9 +85,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private bool _closeWhenIdle;
     private readonly TemporaryWorkspace _temporary = new();
 
-    // 橡皮筋框选（从列表空白处左键拖动，效仿资源管理器）
+    // Blank-space or Ctrl+item marquee; native Ctrl clicks remain native until
+    // the system drag threshold is crossed. Selection is based on mouse-down.
+    private bool _marqueePending;
+    private bool _marqueeFromItem;
+    private bool _changingMarqueeCapture;
     private bool _marqueeActive;
     private Point _marqueeStart;
+    private double _marqueeStartContentY;
+    private DispatcherTimer? _marqueeScrollTimer;
     private readonly HashSet<object> _marqueeInitialSelection = new();
     private ModifierKeys _marqueeModifiers;
 
@@ -103,9 +109,33 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         InitializeComponent();
         FileList.ItemsSource = _visibleEntries;
         DirectoryTree.ItemsSource = _treeRoots;
+        FileList.LostMouseCapture += FileList_LostMouseCapture;
+        FileListCard.LostMouseCapture += FileList_LostMouseCapture;
+        FileListCard.PreviewMouseMove += (sender, e) =>
+        {
+            if (Mouse.Captured == FileListCard && (_marqueePending || _marqueeActive))
+            { FileList_PreviewMouseMove(sender, e); e.Handled = true; }
+        };
+        FileListCard.PreviewMouseLeftButtonUp += (sender, e) =>
+        {
+            if (Mouse.Captured == FileListCard && (_marqueePending || _marqueeActive))
+            { FileList_PreviewMouseLeftButtonUp(sender, e); e.Handled = true; }
+        };
+        FileListCard.PreviewMouseWheel += (_, e) =>
+        {
+            if (Mouse.Captured == FileListCard && (_marqueePending || _marqueeActive))
+            { ScrollMarqueeWheel(e.GetPosition(FileList), e.Delta); e.Handled = true; }
+        };
+        FileListCard.PreviewMouseRightButtonDown += (_, e) =>
+        {
+            if (_marqueePending || _marqueeActive) { CancelMarquee(); e.Handled = true; }
+        };
+        FileList.IsEnabledChanged += (_, _) => { if (!FileList.IsEnabled) CancelMarquee(); };
+        Deactivated += (_, _) => { if (!_dragActive) { CancelMarquee(); ResetTreeDragGesture(); } };
 
         _engine = new SevenZipEngine(Path.Combine(AppContext.BaseDirectory, "7zip", "7z.exe"));
         _authStore = AuthStore.Load();
+        _engine.ZipSlipProtectionEnabled = _authStore.ZipSlipProtectionEnabled;
         _rateLimiter = LocalRateLimiter.Load();
         _deviceFp = _authStore.DeviceFp;
         _keyFetch = CreateKeyFetchClient();
@@ -171,6 +201,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _authStore.ArchiveBombProtectionEnabled = enabled;
     }
 
+    public void SetZipSlipProtection(bool enabled)
+    {
+        _authStore.ZipSlipProtectionEnabled = enabled;
+        _engine.ZipSlipProtectionEnabled = enabled;
+    }
+
     /// <summary>主题切换后重新计算玻璃卡片的色调。</summary>
     public void RefreshCustomBackgroundAppearance()
     {
@@ -219,6 +255,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     protected override void OnClosed(EventArgs e)
     {
+        ResetPointerGesture();
         _temporary.Dispose();
         base.OnClosed(e);
     }
@@ -313,7 +350,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         e.Handled = true;
         if (node.FullPath.Length == 0)
         {
-            var roots = ArchiveSelectionPlan.ArchiveRoots(_entries);
+            var roots = GetArchiveRootsForExtraction();
             await StartArchiveDragAsync(roots, Path.GetFileNameWithoutExtension(_archivePath) ?? "压缩包");
         }
         else await StartArchiveDragAsync(new[] { new ArchiveEntry { Path = node.FullPath, IsDir = true } });
@@ -350,6 +387,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void NavigateArchiveDirectory(string directory)
     {
+        ResetPointerGesture();
         _currentDirectory = NormalizeArchivePath(directory);
         _visibleEntries.Clear();
 
@@ -433,6 +471,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private async void FileList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
+        if (Keyboard.Modifiers != ModifierKeys.None || _marqueeActive) return;
         ResetPointerGesture();
         if (_busyCts != null) return;
         if (_visibleEntries.Count == 0) return; // 双击发生在空态/列头时不处理
@@ -476,7 +515,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         string archive = _archivePath;
         string pwd = _currentPassword ?? "";
         ArchiveSelectionPlan plan;
-        try { plan = ArchiveSelectionPlan.Create(_entries.ToList(), new[] { entry }); }
+        try { plan = ArchiveSelectionPlan.Create(_entries.ToList(), new[] { entry }, inspectArchive: _authStore.ZipSlipProtectionEnabled); }
         catch (Exception ex) { ShowNotice("无法打开", ex.Message, NoticeKind.Warning); return; }
         string tmpDir = _temporary.CreateDirectory("open");
         if (!TryPrepareExtractionSpace(tmpDir, new[] { entry }, true, out var guard, cleanupOnStop: true))
@@ -550,7 +589,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void FileList_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape)
-        { _busyCts?.Cancel(); ResetPointerGesture(); e.Handled = true; return; }
+        { _busyCts?.Cancel(); CancelMarquee(); e.Handled = true; return; }
+        if (_marqueeActive || _marqueePending)
+        {
+            var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (key is not (Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift or Key.LeftAlt or Key.RightAlt))
+                e.Handled = true;
+            return;
+        }
         if (_busyCts != null) return;
         if (e.Key == Key.Back || (e.Key == Key.Up && Keyboard.Modifiers == ModifierKeys.Alt))
         { NavigateArchiveDirectory(GetParentDirectory(_currentDirectory)); e.Handled = true; }
@@ -612,7 +658,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         // Capture all identity before entering the native modal loop.
         string archive = _archivePath;
         ArchiveSelectionPlan plan;
-        try { plan = ArchiveSelectionPlan.Create(_entries.ToList(), selected, wrapper); }
+        try { plan = ArchiveSelectionPlan.Create(_entries.ToList(), selected, wrapper, _authStore.ZipSlipProtectionEnabled); }
         catch (Exception ex) { ShowNotice("无法拖放这些项目", ex.Message, NoticeKind.Warning); return; }
         if (!await EnsurePasswordForArchiveAsync()) return;
         // A password dialog consumes the original mouse gesture; do not start a phantom drop.
@@ -712,177 +758,254 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void FileList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        // Preview 事件也会经过 ListView 本身；若起点是滚动条/滑块，绝不能把它当作
-        // 列表空白区来启动框选，否则拖动滑块会被框选逻辑抢走。
-        if (_busyCts != null || e.ClickCount > 1 || IsInsideScrollBar(e.OriginalSource as DependencyObject) ||
+        if (_busyCts != null || (e.ClickCount > 1 && !Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) || IsInsideScrollBar(e.OriginalSource as DependencyObject) ||
             FindVisualAncestor<GridViewColumnHeader>(e.OriginalSource as DependencyObject) != null)
-        {
-            ResetPointerGesture();
-            return;
-        }
+        { ResetPointerGesture(); return; }
 
+        ResetPointerGesture();
         var pos = e.GetPosition(FileList);
         _mouseDownPos = pos;
-        _mouseDownItem = null;
-        _clickPending = false;
-        _dragThresholdReached = false;
-        _dragOutStarted = false;
-
         var item = GetItemAt(pos);
-        if (item != null)
+        var modifiers = Keyboard.Modifiers;
+        if (item == null)
         {
-            ModifierKeys modifiers = Keyboard.Modifiers;
-            bool inMultiSelection =
-                FileList.SelectedItems.Count > 1 && FileList.SelectedItems.Contains(item);
-
-            // Ctrl / Shift 始终由 ListView 原生处理：切换单项或扩展范围。
-            if (modifiers == ModifierKeys.None && inMultiSelection)
-            {
-                // 普通按在多选集合内：先保留集合供可能的拖出；若只是单击再塌缩。
-                _dragCandidate = true;
-                _clickPending = true;
-                _mouseDownItem = item;
-                _marqueeActive = false;
-                HideMarquee();
-                e.Handled = true;
-            }
-            else
-            {
-                // 无修饰键可开始拖出；带 Ctrl/Shift 的手势只服务于选择。
-                _dragCandidate = modifiers == ModifierKeys.None;
-                _marqueeActive = false;
-                HideMarquee();
-
-                // Native selection preserves keyboard focus and Shift range anchors.
-            }
+            FileList.Focus();
+            PrepareMarquee(pos, modifiers, fromItem: false);
+            e.Handled = true;
+            return;
         }
-        else
+        if (modifiers.HasFlag(ModifierKeys.Control))
         {
-            // 空白处按住拖动 = 框选；普通单击空白 = 取消选择。
-            _dragCandidate = false;
-            BeginMarquee(pos);
-            // 选择完全由 BeginMarquee 按修饰键规则处理，阻止 ListView 再次改写它。
+            // Snapshot BEFORE the ListView's native Ctrl click toggles the row.
+            // Do not handle mouse-down: native focus and Shift anchor still work.
+            PrepareMarquee(pos, modifiers, fromItem: true);
+            return;
+        }
+        _dragCandidate = modifiers == ModifierKeys.None;
+        if (_dragCandidate && FileList.SelectedItems.Count > 1 && FileList.SelectedItems.Contains(item))
+        {
+            _clickPending = true;
+            _mouseDownItem = item;
             e.Handled = true;
         }
     }
 
     private async void FileList_PreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (_marqueeActive)
-        {
-            UpdateMarquee(e.GetPosition(FileList));
-            return;
-        }
-
+        if (TryUpdateMarquee(e.GetPosition(FileList), e.LeftButton == MouseButtonState.Pressed, Keyboard.Modifiers))
+        { e.Handled = true; return; }
         if (!_dragCandidate) return;
-        if (e.LeftButton != MouseButtonState.Pressed)
-        {
-            ResetPointerGesture();
-            return;
-        }
+        if (e.LeftButton != MouseButtonState.Pressed) { ResetPointerGesture(); return; }
+        // A modifier pressed after mouse-down must not accidentally extract.
+        if (Keyboard.Modifiers != ModifierKeys.None) return;
         var pos = e.GetPosition(FileList);
-        if (!_dragThresholdReached &&
-            Math.Abs(pos.X - _mouseDownPos.X) < SystemParameters.MinimumHorizontalDragDistance &&
-            Math.Abs(pos.Y - _mouseDownPos.Y) < SystemParameters.MinimumVerticalDragDistance)
-        {
-            return;
-        }
-
+        if (!CrossedDragThreshold(_mouseDownPos, pos)) return;
         _dragThresholdReached = true;
-
-
-        // Native dragging starts at the normal threshold; extraction is deferred until requested.
         _clickPending = false;
         _dragCandidate = false;
         _dragOutStarted = true;
         if (Mouse.Captured == FileList) Mouse.Capture(null);
         e.Handled = true;
-        await StartArchiveDragAsync(FileList.SelectedItems.Cast<ArchiveEntry>().ToList());
+        try { await StartArchiveDragAsync(FileList.SelectedItems.Cast<ArchiveEntry>().ToList()); }
+        finally { ResetPointerGesture(); }
     }
 
     private void FileList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (_marqueeActive)
-        {
-            _marqueeActive = false;
-            HideMarquee();
-            if (Mouse.Captured == FileList) Mouse.Capture(null);
-            e.Handled = true;
-        }
-
-        // 多选集合内的普通单击（未移动）→ Windows 资源管理器式塌缩为单选。
+        bool handled = _marqueeActive || (_marqueePending && !_marqueeFromItem);
+        if (_marqueeActive) UpdateMarquee(e.GetPosition(FileList));
         if (_clickPending && !_dragThresholdReached && _mouseDownItem != null)
         {
             FileList.SelectedItems.Clear();
             FileList.SelectedItems.Add(_mouseDownItem);
-            e.Handled = true;
+            handled = true;
         }
-
         if (!_dragOutStarted) ResetPointerGesture();
+        if (handled) e.Handled = true;
     }
 
-    private void BeginMarquee(Point start)
+    private static bool CrossedDragThreshold(Point start, Point current) =>
+        Math.Abs(current.X - start.X) >= SystemParameters.MinimumHorizontalDragDistance ||
+        Math.Abs(current.Y - start.Y) >= SystemParameters.MinimumVerticalDragDistance;
+
+    private void PrepareMarquee(Point start, ModifierKeys modifiers, bool fromItem)
     {
-        _marqueeActive = true;
+        _dragCandidate = false;
+        _clickPending = false;
+        _marqueePending = true;
+        _marqueeFromItem = fromItem;
         _marqueeStart = start;
-        _marqueeModifiers = Keyboard.Modifiers;
+        _marqueeStartContentY = start.Y + (GetListScrollViewer()?.VerticalOffset ?? 0);
+        _marqueeModifiers = modifiers;
         _marqueeInitialSelection.Clear();
         foreach (var item in FileList.SelectedItems) _marqueeInitialSelection.Add(item);
-
-        // 普通空白点击立即取消选择；Ctrl/Shift 框选保留原有集合作基准。
-        if (!_marqueeModifiers.HasFlag(ModifierKeys.Control) &&
-            !_marqueeModifiers.HasFlag(ModifierKeys.Shift))
-        {
+        if (!fromItem && (modifiers & (ModifierKeys.Control | ModifierKeys.Shift)) == 0)
             FileList.SelectedItems.Clear();
-        }
+        // Blank-space input has no native selection capture. Item input retains
+        // the ListView's native capture and click behaviour until dragging begins.
+        if (!fromItem && !CaptureMarqueeMouse()) CancelMarquee();
+    }
 
-        MarqueeCanvas.Visibility = Visibility.Visible;
-        Mouse.Capture(FileList);
-        UpdateMarquee(start);
+    private bool TryUpdateMarquee(Point pos, bool leftButtonDown, ModifierKeys modifiers)
+    {
+        if (!leftButtonDown)
+        {
+            bool consumed = _marqueeActive;
+            if (_marqueePending || _marqueeActive || _dragCandidate) ResetPointerGesture();
+            return consumed;
+        }
+        if (!_marqueePending && !_marqueeActive && _dragCandidate && modifiers.HasFlag(ModifierKeys.Control))
+            PrepareMarquee(_mouseDownPos, modifiers, fromItem: true);
+        if (!_marqueePending && !_marqueeActive) return false;
+        if (!_marqueeActive)
+        {
+            if (!CrossedDragThreshold(_marqueeStart, pos)) return false;
+            _marqueeActive = true;
+            _marqueePending = false;
+            if (!CaptureMarqueeMouse()) { CancelMarquee(); return true; }
+            MarqueeCanvas.Visibility = Visibility.Visible;
+            _marqueeScrollTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(30), DispatcherPriority.Input,
+                (_, _) => MarqueeScrollTick(), Dispatcher);
+            _marqueeScrollTimer.Start();
+        }
+        UpdateMarquee(pos);
+        return true;
+    }
+
+    private ScrollViewer? GetListScrollViewer() => FindVisualDescendant<ScrollViewer>(FileList);
+
+    private bool CaptureMarqueeMouse()
+    {
+        // Capturing the ListBox starts its own selection/autoscroll timer. Keep
+        // capture on the surrounding card instead, with one gesture owner.
+        _changingMarqueeCapture = true;
+        try { return Mouse.Capture(FileListCard, CaptureMode.Element); }
+        finally { _changingMarqueeCapture = false; }
+    }
+
+    private Rect GetMarqueeViewport()
+    {
+        var viewer = GetListScrollViewer();
+        viewer?.ApplyTemplate();
+        // GridView also contains a header ScrollViewer. Its presenter must not
+        // be mistaken for the rows viewport.
+        var presenter = viewer?.Template.FindName("PART_ScrollContentPresenter", viewer) as ScrollContentPresenter;
+        if (presenter == null && viewer != null)
+            presenter = FindVisualDescendant<ScrollContentPresenter>(viewer, p => ReferenceEquals(p.TemplatedParent, viewer));
+        return presenter == null ? new Rect(0, 0, FileList.ActualWidth, FileList.ActualHeight)
+            : new Rect(presenter.TranslatePoint(new Point(), FileList), new Size(presenter.ActualWidth, presenter.ActualHeight));
+    }
+
+    private void MarqueeScrollTick()
+    {
+        if (!_marqueeActive) return;
+        if (Mouse.LeftButton != MouseButtonState.Pressed) { ResetPointerGesture(); return; }
+        ScrollMarqueeAt(Mouse.GetPosition(FileList));
+    }
+
+    private void ScrollMarqueeAt(Point pos)
+    {
+        var viewer = GetListScrollViewer();
+        if (viewer == null) return;
+        var viewport = GetMarqueeViewport();
+        const double edge = 24;
+        double delta = pos.Y < viewport.Top + edge ? -Math.Min(40, viewport.Top + edge - pos.Y)
+            : pos.Y > viewport.Bottom - edge ? Math.Min(40, pos.Y - viewport.Bottom + edge) : 0;
+        if (delta == 0) return;
+        viewer.ScrollToVerticalOffset(Math.Clamp(viewer.VerticalOffset + delta, 0, viewer.ScrollableHeight));
+        FileList.UpdateLayout();
+        UpdateMarquee(pos);
+    }
+
+    private void ScrollMarqueeWheel(Point pos, int delta)
+    {
+        var viewer = GetListScrollViewer();
+        int lines = SystemParameters.WheelScrollLines;
+        if (viewer == null || lines == 0) return;
+        double step = lines < 0 ? viewer.ViewportHeight : lines * 32;
+        viewer.ScrollToVerticalOffset(Math.Clamp(viewer.VerticalOffset - delta / 120.0 * step, 0, viewer.ScrollableHeight));
+        FileList.UpdateLayout();
+        if (_marqueeActive) UpdateMarquee(pos);
     }
 
     private void UpdateMarquee(Point currentPoint)
     {
-        double x = Math.Min(_marqueeStart.X, currentPoint.X);
-        double y = Math.Min(_marqueeStart.Y, currentPoint.Y);
-        double w = Math.Abs(currentPoint.X - _marqueeStart.X);
-        double h = Math.Abs(currentPoint.Y - _marqueeStart.Y);
-        var band = new Rect(x, y, w, h);
+        var viewer = GetListScrollViewer();
+        double offset = viewer?.VerticalOffset ?? 0;
+        var viewport = GetMarqueeViewport();
+        var current = new Point(Math.Clamp(currentPoint.X, viewport.Left, viewport.Right),
+            Math.Clamp(currentPoint.Y, viewport.Top, viewport.Bottom));
+        var start = new Point(_marqueeStart.X, _marqueeStartContentY - offset);
+        var band = new Rect(new Point(Math.Min(start.X, current.X), Math.Min(start.Y, current.Y)),
+            new Size(Math.Max(1, Math.Abs(current.X - start.X)), Math.Max(1, Math.Abs(current.Y - start.Y))));
+        var drawn = Rect.Intersect(band, viewport);
+        if (!drawn.IsEmpty)
+        {
+            var origin = FileList.TranslatePoint(drawn.TopLeft, MarqueeCanvas);
+            MarqueeBox.Width = drawn.Width;
+            MarqueeBox.Height = drawn.Height;
+            Canvas.SetLeft(MarqueeBox, origin.X);
+            Canvas.SetTop(MarqueeBox, origin.Y);
+        }
 
-        MarqueeBox.Width = w;
-        MarqueeBox.Height = h;
-        Canvas.SetLeft(MarqueeBox, x);
-        Canvas.SetTop(MarqueeBox, y);
-
-        // 资源管理器行为：普通框选替换；Shift 追加；Ctrl 对框住的项切换选中状态。
-        bool toggle = _marqueeModifiers.HasFlag(ModifierKeys.Control);
+        // Ctrl toggles against one stable snapshot; Shift (including Ctrl+Shift)
+        // adds. Moving out of and back into a row never repeatedly toggles it.
         bool append = _marqueeModifiers.HasFlag(ModifierKeys.Shift);
-        var newSel = new HashSet<object>();
-        if (toggle || append)
+        bool toggle = !append && _marqueeModifiers.HasFlag(ModifierKeys.Control);
+        var newSel = toggle || append ? new HashSet<object>(_marqueeInitialSelection) : new HashSet<object>();
+        var panel = FindVisualDescendant<VirtualizingStackPanel>(FileList);
+        var anchor = panel == null ? null : Enumerable.Range(0, VisualTreeHelper.GetChildrenCount(panel))
+            .Select(i => VisualTreeHelper.GetChild(panel, i)).OfType<ListViewItem>().FirstOrDefault(v => v.ActualHeight > 0);
+        if (anchor != null)
         {
-            foreach (var it in _marqueeInitialSelection) newSel.Add(it);
+            // Rows use a uniform, non-wrapping template. Derive content bounds
+            // from a realized row so offscreen rows remain selected across scroll.
+            int anchorIndex = FileList.ItemContainerGenerator.IndexFromContainer(anchor);
+            double height = anchor.ActualHeight;
+            double top = anchor.TranslatePoint(new Point(), FileList).Y - anchorIndex * height;
+            int first = Math.Max(0, (int)Math.Floor((band.Top - top) / height));
+            int last = Math.Min(FileList.Items.Count - 1, (int)Math.Floor((band.Bottom - top) / height));
+            double left = anchor.TranslatePoint(new Point(), FileList).X;
+            if (band.Right >= left && band.Left <= left + anchor.ActualWidth)
+                for (int i = first; i <= last; i++) SelectMarqueeItem(newSel, FileList.Items[i], toggle);
         }
-
-        int count = FileList.Items.Count;
-        for (int i = 0; i < count; i++)
+        else
         {
-            var r = GetItemBounds(i);
-            if (r.IsEmpty) continue;
-            if (!band.IntersectsWith(r) && !band.Contains(r) && !r.Contains(band)) continue;
-
-            object listItem = FileList.Items[i];
-            if (toggle && _marqueeInitialSelection.Contains(listItem))
-                newSel.Remove(listItem);
-            else
-                newSel.Add(listItem);
+            for (int i = 0; i < FileList.Items.Count; i++)
+            {
+                var bounds = GetItemBounds(i);
+                if (!bounds.IsEmpty && band.IntersectsWith(bounds)) SelectMarqueeItem(newSel, FileList.Items[i], toggle);
+            }
         }
-
+        // Apply only the delta: avoid clearing/re-adding the entire selection and
+        // generating an event storm on every pointer movement.
         var currentSelection = new HashSet<object>(FileList.SelectedItems.Cast<object>());
-        if (!newSel.SetEquals(currentSelection))
-        {
-            FileList.SelectedItems.Clear();
-            foreach (var it in newSel) FileList.SelectedItems.Add(it);
-        }
+        foreach (var item in currentSelection.Where(i => !newSel.Contains(i)))
+            FileList.SelectedItems.Remove(item);
+        foreach (var item in newSel.Where(i => !currentSelection.Contains(i))) FileList.SelectedItems.Add(item);
+    }
+
+    private void SelectMarqueeItem(HashSet<object> selection, object item, bool toggle)
+    {
+        if (toggle && _marqueeInitialSelection.Contains(item)) selection.Remove(item);
+        else selection.Add(item);
+    }
+
+    private void FileList_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (!_changingMarqueeCapture &&
+            (ReferenceEquals(e.OriginalSource, FileList) || ReferenceEquals(e.OriginalSource, FileListCard)) &&
+            Mouse.Captured != FileList && Mouse.Captured != FileListCard && (_marqueePending || _marqueeActive))
+            CancelMarquee();
+    }
+
+    private void CancelMarquee()
+    {
+        var restore = _marqueePending || _marqueeActive ? _marqueeInitialSelection.ToArray() : null;
+        ResetPointerGesture();
+        if (restore == null) return;
+        FileList.SelectedItems.Clear();
+        foreach (var item in restore.Where(i => FileList.Items.Contains(i))) FileList.SelectedItems.Add(item);
     }
 
     private void HideMarquee() => MarqueeCanvas.Visibility = Visibility.Collapsed;
@@ -892,13 +1015,28 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void ResetPointerGesture()
     {
+        _marqueePending = false;
         _marqueeActive = false;
+        _marqueeScrollTimer?.Stop();
         HideMarquee();
         _dragCandidate = false;
         _dragThresholdReached = false;
+        _dragOutStarted = false;
         _clickPending = false;
         _mouseDownItem = null;
-        if (Mouse.Captured == FileList) Mouse.Capture(null);
+        _marqueeInitialSelection.Clear();
+        if (Mouse.Captured == FileList || Mouse.Captured == FileListCard) Mouse.Capture(null);
+    }
+
+    private static T? FindVisualDescendant<T>(DependencyObject root, Func<T, bool>? predicate = null) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T found && (predicate == null || predicate(found))) return found;
+            if (FindVisualDescendant<T>(child, predicate) is T nested) return nested;
+        }
+        return null;
     }
 
     private Rect GetItemBounds(int index)
@@ -1136,6 +1274,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
 
         // 未加密文件名时可以立即建立目录树；加密文件名需等待密码后的 relist。
+        if (!_headerEncrypted && !await CheckArchivePathSafetyAsync(list, ct))
+        {
+            HideSkeleton();
+            ReturnAfterOpenFailure("Zip Slip 安全防护已阻止打开危险压缩包。");
+            return;
+        }
         if (!_headerEncrypted)
             InitializeArchiveBrowser();
 
@@ -1197,6 +1341,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             foreach (var en in relist.Entries) _entries.Add(en);
             _archiveInfo = relist.Info;
             _headerEncrypted = false;
+            if (!await CheckArchivePathSafetyAsync(relist, ct))
+            {
+                HideSkeleton();
+                ReturnAfterOpenFailure("Zip Slip 安全防护已阻止打开危险压缩包。");
+                return;
+            }
             if (!ConfirmHighRiskArchive())
             {
                 HideSkeleton();
@@ -1525,7 +1675,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         latestPreferences.LastExtractDir = _authStore.LastExtractDir;
         latestPreferences.Save();
 
-        await ExtractSelectionToRootAsync(dlg.FolderName, ArchiveSelectionPlan.ArchiveRoots(_entries));
+        await ExtractSelectionToRootAsync(dlg.FolderName, GetArchiveRootsForExtraction());
     }
 
     // ---------- 列表右键：解压到 当前目录 / 桌面 / 指定目录 ----------
@@ -1586,12 +1736,22 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private Task ExtractToRootAsync(string rootDir)
         => ExtractSelectionToRootAsync(rootDir, FileList.SelectedItems.Cast<ArchiveEntry>().ToList());
 
+    private IReadOnlyList<ArchiveEntry> GetArchiveRootsForExtraction()
+    {
+        try { return ArchiveSelectionPlan.ArchiveRoots(_entries); }
+        catch (InvalidDataException ex)
+        {
+            ShowNotice("无法处理这些文件路径", ex.Message, NoticeKind.Warning);
+            return Array.Empty<ArchiveEntry>();
+        }
+    }
+
     private async Task ExtractSelectionToRootAsync(string rootDir, IReadOnlyList<ArchiveEntry> selected)
     {
         if (_busyCts != null || _archivePath == null || selected.Count == 0) return;
         string archive = _archivePath;
         ArchiveSelectionPlan plan;
-        try { plan = ArchiveSelectionPlan.Create(_entries.ToList(), selected); }
+        try { plan = ArchiveSelectionPlan.Create(_entries.ToList(), selected, inspectArchive: _authStore.ZipSlipProtectionEnabled); }
         catch (Exception ex) { ShowNotice("无法解压", ex.Message, NoticeKind.Warning); return; }
         string staging = Path.Combine(rootDir, ".zipora-extract-" + Guid.NewGuid().ToString("N"));
         if (!TryPrepareExtractionSpace(staging, selected, true, out var guard, cleanupOnStop: true)) return;
@@ -1657,13 +1817,24 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 break;
         }
 
-        await ExtractSelectionToRootAsync(root, ArchiveSelectionPlan.ArchiveRoots(_entries));
+        await ExtractSelectionToRootAsync(root, GetArchiveRootsForExtraction());
     }
 
     /// <summary>打开设置窗口（含系统右键菜单开关）。</summary>
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
         new Dialogs.SettingsDialog { Owner = this }.ShowDialog();
+    }
+
+    private async Task<bool> CheckArchivePathSafetyAsync(ArchiveListResult listing, CancellationToken ct)
+    {
+        if (!_authStore.ZipSlipProtectionEnabled) return true;
+        string archive = _archivePath!;
+        var report = await Task.Run(() => ArchivePathSecurity.InspectArchive(archive, listing, ct), ct);
+        if (report.IsSafe) return true;
+        HideSkeleton();
+        ShowNotice("检测到危险压缩包路径", report.Describe(), NoticeKind.Warning);
+        return false;
     }
 
     /// <summary>显示当前压缩包的格式、结构、安全信息与内容分类统计。</summary>
@@ -1723,27 +1894,6 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     // ---------- 更新检测 ----------
-
-    private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
-    {
-        Status("正在检测更新…");
-        var info = await UpdateChecker.CheckAsync();
-        if (info == null)
-        {
-            Status("检查更新失败（网络异常或服务器不可用）。");
-            ShowNotice("检查更新失败", "网络异常或更新服务器暂不可用，请稍后再试。", NoticeKind.Warning);
-            return;
-        }
-        if (info.IsNewer)
-        {
-            PromptUpdate(info);
-        }
-        else
-        {
-            Status($"当前已是最新版本 v{AppInfo.Version}。");
-            ShowNotice("已是最新版本", $"当前使用的是 Zipora v{AppInfo.Version}。", NoticeKind.Success);
-        }
-    }
 
     /// <summary>提示有新版本，用户确认后打开官网下载页。</summary>
     private void PromptUpdate(UpdateInfo info)

@@ -22,6 +22,7 @@ public enum PasswordTestResult { Ok, WrongPassword, Error }
 public record ExtractResult(bool Success, bool WrongPassword, bool Cancelled, string Message)
 {
     public bool InsufficientSpace { get; init; }
+    public bool BlockedByPathProtection { get; init; }
 }
 
 public enum ArchiveTestStatus { Passed, Warning, WrongPassword, Failed, Cancelled }
@@ -45,6 +46,7 @@ public partial class SevenZipEngine
     }
 
     public bool IsAvailable => File.Exists(_exePath);
+    public bool ZipSlipProtectionEnabled { get; set; } = true;
 
     [GeneratedRegex(@"^\s*(\d{1,3})%")]
     private static partial Regex ProgressRegex();
@@ -296,6 +298,79 @@ public partial class SevenZipEngine
         string archive, string? password, string outDir,
         IProgress<double>? progress = null, CancellationToken ct = default,
         ExtractionSpaceGuard? spaceGuard = null)
+        => ExtractGuardedAsync(archive, password, outDir, null, progress, ct, spaceGuard);
+
+    private async Task<ExtractResult> ExtractGuardedAsync(
+        string archive, string? password, string outDir, IReadOnlyList<string>? entryPaths,
+        IProgress<double>? progress, CancellationToken ct, ExtractionSpaceGuard? spaceGuard)
+    {
+        try
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!ZipSlipProtectionEnabled)
+                return entryPaths == null
+                    ? await ExtractWholeCoreAsync(archive, password, outDir, progress, ct, spaceGuard)
+                    : await ExtractSelectedCoreAsync(archive, password, outDir, entryPaths, progress, ct, spaceGuard);
+            ArchivePathSecurity.EnsureNoReparseAncestors(outDir);
+            if (entryPaths?.Count == 0)
+            {
+                Directory.CreateDirectory(outDir);
+                return new ExtractResult(true, false, false, "空目录已准备。");
+            }
+            // Prevent replacement between listing and extraction. Do not cache an old UI listing.
+            using var lease = new FileStream(archive, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var listing = await Task.Run(() => List(archive, password, ct), ct);
+            if (listing.Status != ArchiveListStatus.Ok)
+                return new ExtractResult(false, listing.Status == ArchiveListStatus.WrongPassword, false,
+                    "安全预检未完成：" + listing.ErrorMessage);
+            await Task.Run(() => ArchivePathSecurity.InspectArchive(archive, listing, ct).ThrowIfUnsafe(), ct);
+            await Task.Run(() =>
+            {
+                var requested = entryPaths?.Select(ArchiveSelectionPlan.ValidatePath)
+                    .ToHashSet(StringComparer.Ordinal);
+                var available = listing.Entries.Select(x => ArchiveSelectionPlan.ValidatePath(x.Path)).ToHashSet(StringComparer.Ordinal);
+                if (requested != null && requested.Any(path => !available.Contains(path)))
+                    throw new InvalidDataException("所选条目已发生变化，请重新打开压缩包。");
+                foreach (var entry in listing.Entries)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    string source = ArchiveSelectionPlan.ValidatePath(entry.Path);
+                    if (requested != null)
+                    {
+                        string candidate = source;
+                        while (!requested.Contains(candidate))
+                        {
+                            int slash = candidate.LastIndexOf('/');
+                            if (slash < 0) { candidate = ""; break; }
+                            candidate = candidate[..slash];
+                        }
+                        if (candidate.Length == 0) continue;
+                    }
+                    string target = ArchiveSelectionPlan.ResolveInside(outDir, entry.Path);
+                    // Do not overwrite an existing hard link (which has no ReparsePoint attribute).
+                    // UI extraction already uses fresh staging directories.
+                    if (File.Exists(target))
+                        throw new InvalidDataException("目标文件已经存在，请解压到新的文件夹，防止覆盖硬链接目标。");
+                }
+            }, ct);
+            var result = entryPaths == null
+                ? await ExtractWholeCoreAsync(archive, password, outDir, progress, ct, spaceGuard)
+                : await ExtractSelectedCoreAsync(archive, password, outDir, entryPaths, progress, ct, spaceGuard);
+            if (result.Success) await Task.Run(() => ArchivePathSecurity.ValidateOutputTree(outDir, ct), ct);
+            return result;
+        }
+        catch (OperationCanceledException) { return new ExtractResult(false, false, true, "已取消。"); }
+        catch (InvalidDataException ex)
+        {
+            return new ExtractResult(false, false, false, "Zip Slip 安全防护已阻止解压：\n" + ex.Message)
+                { BlockedByPathProtection = true };
+        }
+        catch (Exception ex) { return new ExtractResult(false, false, false, "安全预检或解压失败：" + ex.Message); }
+    }
+
+    private Task<ExtractResult> ExtractWholeCoreAsync(
+        string archive, string? password, string outDir,
+        IProgress<double>? progress, CancellationToken ct, ExtractionSpaceGuard? spaceGuard)
     {
         var args = new List<string>
         {
@@ -307,11 +382,16 @@ public partial class SevenZipEngine
     }
 
     /// <summary>只解压选中的若干条目（保留包内相对路径）。-spd 关闭通配符，避免文件名里的特殊字符被当通配符。</summary>
-    public async Task<ExtractResult> ExtractSelectedAsync(
+    public Task<ExtractResult> ExtractSelectedAsync(
         string archive, string? password, string outDir,
         IReadOnlyList<string> entryPaths,
         IProgress<double>? progress = null, CancellationToken ct = default,
         ExtractionSpaceGuard? spaceGuard = null)
+        => ExtractGuardedAsync(archive, password, outDir, entryPaths, progress, ct, spaceGuard);
+
+    private async Task<ExtractResult> ExtractSelectedCoreAsync(
+        string archive, string? password, string outDir, IReadOnlyList<string> entryPaths,
+        IProgress<double>? progress, CancellationToken ct, ExtractionSpaceGuard? spaceGuard)
     {
         var args = new List<string>
         {
@@ -793,6 +873,10 @@ public partial class SevenZipEngine
                 case "Attributes":
                     // 7z 格式通常只输出 Attributes = D，不额外输出 Folder 字段。
                     if (value.StartsWith('D')) current.IsDir = true;
+                    if (value.Contains("lrwx", StringComparison.Ordinal) ||
+                        (uint.TryParse(value, System.Globalization.NumberStyles.HexNumber,
+                            System.Globalization.CultureInfo.InvariantCulture, out uint attributes) &&
+                         (attributes & (uint)FileAttributes.ReparsePoint) != 0)) current.IsLink = true;
                     sawAny = true;
                     break;
                 case "Encrypted":
@@ -801,7 +885,7 @@ public partial class SevenZipEngine
                     break;
                 case "Symbolic Link":
                 case "Hard Link":
-                    current.IsLink = !string.IsNullOrEmpty(value);
+                    current.IsLink |= !string.IsNullOrEmpty(value);
                     break;
                 case "Method":
                     current.Method = value;
