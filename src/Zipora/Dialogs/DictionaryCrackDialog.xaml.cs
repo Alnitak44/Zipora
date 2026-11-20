@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
@@ -14,7 +15,6 @@ namespace Zipora.Dialogs;
 /// </summary>
 public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
 {
-
     /// <summary>取主题语义刷（找不到时回退 fallback），避免硬编码颜色。</summary>
     private static System.Windows.Media.Brush ThemeBrush(string key, System.Windows.Media.Brush fallback)
     {
@@ -25,16 +25,21 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
     private CancellationTokenSource? _cts;
 
     private string? _archivePath;
-    private List<string> _passwords = new();
+    private List<DictionaryEntry> _passwords = new();
+    private int _runOffset;
+    private int _runCount;
+    private int _cursor;
+    private int _totalLines;
     private long _tested;
     private long _total;
     private Stopwatch _stopwatch = new();
     private string _lastPass = "";
+    private int _lastLine = 1;
     private string? _foundPassword;
+    private int _resumeLine;
 
     /// <summary>命中并点击「用此密码解压」后返回 (压缩包路径, 密码)；直接关闭返回 null。</summary>
     public (string Archive, string Password)? CrackResult { get; private set; }
-
 
     /// <summary>字典下拉项：文件名 + 右侧大小。</summary>
     private sealed class DictItem
@@ -85,6 +90,13 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
                 RefreshDictionaryState();
             }
         }
+        RestoreProgressForSelection();
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        _cts?.Cancel();
+        base.OnClosing(e);
     }
 
     /// <summary>扫描程序目录 dictionaries\ 下的内置字典，展开列表可选（右侧显示大小）。</summary>
@@ -112,6 +124,7 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
             string.Equals(item.FilePath, previous, StringComparison.OrdinalIgnoreCase));
         if (DictBox.SelectedItem == null && DictBox.Items.Count > 0) DictBox.SelectedIndex = 0;
         RefreshDictionaryState();
+        RestoreProgressForSelection();
     }
 
     private void RefreshDictionaryState()
@@ -145,7 +158,11 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
         if (item == null) { item = new DictItem(path); DictBox.Items.Add(item); }
         DictBox.SelectedItem = item;
         RefreshDictionaryState();
+        RestoreProgressForSelection();
     }
+
+    private void DictBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        => RestoreProgressForSelection();
 
     /// <summary>当前字典路径；没有字典时返回 null，不自动弹文件选择器。</summary>
     private string? SelectedDictPath()
@@ -166,11 +183,90 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
         {
             _archivePath = dlg.FileName;
             ArchiveBox.Text = dlg.FileName;
+            RestoreProgressForSelection();
         }
     }
 
-    private async void Start_Click(object sender, RoutedEventArgs e)
+    /// <summary>读取当前压缩包 + 字典对应的断点位置，恢复“起始行”和「继续」按钮。</summary>
+    private void RestoreProgressForSelection()
     {
+        if (_cts != null) return;
+        string? archive = ArchiveBox.Text?.Trim();
+        string? dict = SelectedDictPath();
+        if (string.IsNullOrEmpty(archive) || dict == null)
+        {
+            _resumeLine = 0;
+            UpdateStopContinueButton();
+            return;
+        }
+        int? line = CrackProgressStore.Load(archive, dict);
+        if (line is >= 1)
+        {
+            _resumeLine = line.Value;
+            StartLineBox.Text = line.Value.ToString();
+            UpdateStopContinueButton();
+            SetStatus($"上次停在第 {line.Value} 行，可点「继续」接着跑。", error: false);
+        }
+        else
+        {
+            _resumeLine = 0;
+            UpdateStopContinueButton();
+        }
+    }
+
+    private async void Start_Click(object sender, RoutedEventArgs e) => await StartCoreAsync();
+
+    /// <summary>运行中显示「中止」，空闲时显示「继续」；两种状态共用一个按钮。</summary>
+    private void UpdateStopContinueButton()
+    {
+        StopContinueButton.Content = "继续";
+        StopContinueButton.IsEnabled = _resumeLine > 0;
+        StopContinueButton.ToolTip = _resumeLine > 0
+            ? $"从第 {_resumeLine} 行继续"
+            : "当前没有可续跑的位置";
+    }
+
+    private async void StopContinue_Click(object sender, RoutedEventArgs e)
+    {
+        if (_cts != null)
+        {
+            _cts.Cancel();
+            return;
+        }
+        if (_resumeLine <= 0)
+        {
+            SetStatus("没有可继续的位置，请先开始一次破解。", error: true);
+            return;
+        }
+        StartLineBox.Text = _resumeLine.ToString();
+        await StartCoreAsync();
+    }
+
+    private int GetThreadCount()
+    {
+        if (ThreadBox.SelectedItem is ComboBoxItem item &&
+            int.TryParse(item.Content?.ToString(), out int n) && n is >= 1 and <= 16)
+            return n;
+        return 4;
+    }
+
+    private bool TryGetStartLine(out int startLine)
+    {
+        string text = StartLineBox.Text.Trim();
+        if (text.Length == 0) { startLine = 1; StartLineBox.Text = "1"; return true; }
+        if (!int.TryParse(text, out startLine) || startLine < 1)
+        {
+            SetStatus("起始行需要是大于 0 的整数。", error: true);
+            StartLineBox.Focus();
+            StartLineBox.SelectAll();
+            return false;
+        }
+        return true;
+    }
+
+    private async Task StartCoreAsync()
+    {
+        if (_cts != null) return;
         if (string.IsNullOrWhiteSpace(ArchiveBox.Text) || !File.Exists(ArchiveBox.Text))
         {
             SetStatus("请先选择有效的压缩包。", error: true);
@@ -182,7 +278,7 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
             SetStatus("请先选择有效的字典文件（展开下拉列表选择内置字典，或浏览其他文件）。", error: true);
             return;
         }
-        if (_cts != null) return;
+        if (!TryGetStartLine(out int startLine)) return;
 
         _archivePath = ArchiveBox.Text.Trim();
         _foundPassword = null;
@@ -191,34 +287,48 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
         CopyButton.IsEnabled = false;
         UseButton.IsEnabled = false;
 
-        int threads = (ThreadBox.SelectedIndex + 1) is int t and >= 1 and <= 16 ? t : 4;
-
-        try
+        string[] raw;
+        try { raw = File.ReadAllLines(dictPath); }
+        catch (Exception ex) { SetStatus("读取字典失败：" + ex.Message, error: true); return; }
+        if (raw.Length == 0) { SetStatus("字典文件为空。", error: true); return; }
+        if (startLine > raw.Length)
         {
-            _passwords = File.ReadAllLines(dictPath)
-                .Select(l => l.Trim())
-                .Where(l => l.Length > 0)
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
-        }
-        catch (Exception ex)
-        {
-            SetStatus("读取字典失败：" + ex.Message, error: true);
+            SetStatus($"起始行超出字典范围（共 {raw.Length} 行）。", error: true);
             return;
         }
 
-        _total = _passwords.Count;
+        List<DictionaryEntry> entries = DictionaryPlan.Build(raw, startLine);
+        if (entries.Count == 0)
+        {
+            SetStatus($"第 {startLine} 行之后没有可测试的密码。", error: true);
+            return;
+        }
+
+        _passwords = entries;
+        _runOffset = 0;
+        _runCount = entries.Count;
+        _totalLines = raw.Length;
+        _total = _runCount;
         _tested = 0;
+        _cursor = 0;
         _lastPass = "";
+        _lastLine = entries[0].Line;
+        _resumeLine = 0;
+        int threads = GetThreadCount();
+
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
 
         StartButton.IsEnabled = false;
-        StopButton.IsEnabled = true;
+        StopContinueButton.Content = "中止";
+        StopContinueButton.IsEnabled = true;
+        StopContinueButton.ToolTip = "中止本次破解并保留当前位置";
         PickArchiveButton.IsEnabled = false;
         RefreshDictButton.IsEnabled = false;
         BrowseDictButton.IsEnabled = false;
         DictBox.IsEnabled = false;
+        ThreadBox.IsEnabled = false;
+        StartLineBox.IsEnabled = false;
         Progress.Maximum = Math.Max(_total, 1);
         Progress.Value = 0;
 
@@ -231,23 +341,22 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
         {
             // 先试空密码（未加密/空密码包）
             bool? empty = await Task.Run(() => _engine.TestPasswordFast(_archivePath, "", ct), ct);
-            if (ct.IsCancellationRequested) return;
             if (empty == true)
             {
                 _foundPassword = "";
                 ResultText.Text = "🎉 该压缩包无需密码（空密码即通过）。";
             }
-            else if (_total > 0)
+            else if (_runCount > 0 && !ct.IsCancellationRequested)
             {
-                int n = threads;
                 var tasks = new List<Task>();
-                for (int i = 0; i < n; i++)
+                for (int i = 0; i < threads; i++)
+                    tasks.Add(Task.Run(() => RunWorker(_runOffset, _runCount, ct), ct));
+                try { await Task.WhenAll(tasks); }
+                catch (OperationCanceledException)
                 {
-                    int idx = i;
-                    var slice = _passwords.Where((_, k) => k % n == idx).ToList();
-                    tasks.Add(Task.Run(() => RunSliceAsync(slice, ct), ct));
+                    // 某个线程命中后取消其余线程，或用户点了「中止」。
+                    // 结果统一在下面判断，不能让取消异常跳过成功分支。
                 }
-                await Task.WhenAll(tasks);
             }
 
             if (_foundPassword != null)
@@ -261,13 +370,27 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
                 CopyButton.IsEnabled = true;
                 UseButton.IsEnabled = true;
                 SaveFoundPassword();
+                CrackProgressStore.Clear(_archivePath, dictPath);
             }
             else if (!ct.IsCancellationRequested)
             {
                 _stopwatch.Stop();
-                ResultText.Text = $"字典已全部尝试完毕（{_tested} 个），未找到正确密码。";
+                ResultText.Text = $"字典已全部尝试完毕（本次 {_tested} 个），未找到正确密码。";
                 ResultText.Foreground = ThemeBrush("ZiporaWarningBrush", System.Windows.Media.Brushes.Firebrick);
+                CrackProgressStore.Clear(_archivePath, dictPath);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // 空密码探测阶段被取消（中止或关窗）：按正常结束处理，
+            // 由 finally 统一恢复控件并写入续跑位置，避免 async void 事件里冒出未处理异常。
+        }
+        catch (Exception ex)
+        {
+            _stopwatch.Stop();
+            ResultText.Text = "破解过程出错，请重试。";
+            ResultText.Foreground = ThemeBrush("ZiporaWarningBrush", System.Windows.Media.Brushes.Firebrick);
+            SetStatus("字典破解失败：" + ex.Message, error: true);
         }
         finally
         {
@@ -275,29 +398,54 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
             _cts.Dispose();
             _cts = null;
             StartButton.IsEnabled = true;
-            StopButton.IsEnabled = false;
             PickArchiveButton.IsEnabled = true;
             RefreshDictButton.IsEnabled = true;
             BrowseDictButton.IsEnabled = true;
+            ThreadBox.IsEnabled = true;
+            StartLineBox.IsEnabled = true;
             RefreshDictionaryState();
             if (ct.IsCancellationRequested && _foundPassword == null)
-                SetStatus("已停止。", error: false);
+            {
+                int claimed = Volatile.Read(ref _cursor);
+                int safeSlot = Math.Max(0, Math.Min(claimed - threads, _runCount));
+                if (safeSlot < _runCount)
+                {
+                    int resume = _passwords[_runOffset + safeSlot].Line;
+                    _resumeLine = resume;
+                    StartLineBox.Text = resume.ToString();
+                    CrackProgressStore.Save(_archivePath, dictPath, resume);
+                    ResultText.Text = $"已中止。可从第 {resume} 行继续。";
+                    ResultText.Foreground = ThemeBrush("ZiporaMutedBrush", System.Windows.Media.Brushes.DimGray);
+                    SetStatus($"已中止：本次测试 {_tested} 个，已保留位置，可从第 {resume} 行继续。", error: false);
+                }
+                else
+                {
+                    SetStatus($"已中止：字典已全部尝试（{_tested} 个）。", error: false);
+                }
+            }
+            UpdateStopContinueButton();
         }
     }
 
-    private void RunSliceAsync(List<string> slice, CancellationToken ct)
+    /// <summary>共享游标分发：每个线程取下一个待测条目，中止后游标前的条目均已被领取。</summary>
+    private void RunWorker(int offset, int count, CancellationToken ct)
     {
-        foreach (var pwd in slice)
+        while (true)
         {
             ct.ThrowIfCancellationRequested();
-            _lastPass = pwd;
-            Interlocked.Increment(ref _tested);
+            int slot = Interlocked.Increment(ref _cursor) - 1;
+            if (slot >= count) return;
 
-            bool? ok = _engine.TestPasswordFast(_archivePath!, pwd, ct);
+            DictionaryEntry entry = _passwords[offset + slot];
+            _lastPass = entry.Password;
+            _lastLine = entry.Line;
+
+            bool? ok = _engine.TestPasswordFast(_archivePath!, entry.Password, ct);
             if (ct.IsCancellationRequested) return;
+            Interlocked.Increment(ref _tested);
             if (ok == true)
             {
-                _foundPassword = pwd;
+                _foundPassword = entry.Password;
                 _cts?.Cancel();
                 return;
             }
@@ -314,12 +462,10 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
             : 0;
         double pct = _total > 0 ? tested * 100.0 / _total : 0;
         string cur = _lastPass.Length > 24 ? _lastPass[..24] + "…" : _lastPass;
-        StatusText.Text = $"正在尝试密码… {tested}/{_total}（{pct:0.0}%）　速度 {speed:0.0} 密码/秒　当前: {cur}";
+        StatusText.Text = $"正在尝试密码… 第 {_lastLine} 行 / 共 {_totalLines:N0} 行　" +
+                          $"已测 {tested:N0}/{_total:N0}（{pct:0.0}%）　速度 {speed:0.0} 密码/秒　当前: {cur}";
         StatusText.Foreground = ThemeBrush("ZiporaMutedBrush", System.Windows.Media.Brushes.DimGray);
     }
-
-    private void Stop_Click(object sender, RoutedEventArgs e)
-        => _cts?.Cancel();
 
     private void Copy_Click(object sender, RoutedEventArgs e)
     {
@@ -358,3 +504,4 @@ public partial class DictionaryCrackDialog : Wpf.Ui.Controls.FluentWindow
             : (System.Windows.Media.Brush)FindResource("TextFillColorSecondaryBrush");
     }
 }
+

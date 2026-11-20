@@ -4,7 +4,8 @@
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     Title="便携密码库" Width="460" SizeToContent="Height" ResizeMode="NoResize"
     WindowStartupLocation="CenterOwner" ShowInTaskbar="False" ExtendsContentIntoTitleBar="True"
-    Background="{DynamicResource ZiporaWindowSurface}" FontFamily="Microsoft YaHei UI" FontSize="13">
+    Background="{DynamicResource ZiporaWindowSurface}" FontFamily="Microsoft YaHei UI" FontSize="13"
+    WindowCornerPreference="Round">
     <StackPanel Margin="16">
         <ui:TitleBar Title="便携密码库" ShowMaximize="False" ShowMinimize="False" FontSize="16" FontWeight="SemiBold"/>
         <Border Style="{StaticResource Card}" Padding="16" Margin="0,8,0,12">

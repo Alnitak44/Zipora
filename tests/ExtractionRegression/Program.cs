@@ -64,6 +64,14 @@ internal static class Program
         foreach (string arg in new[] { "a", "-tzip", archive, "." }) psi.ArgumentList.Add(arg);
         using (var process = Process.Start(psi)!) { await process.WaitForExitAsync(); Check(process.ExitCode == 0, "create ZIP fixture"); }
         var engine = new SevenZipEngine(exe);
+        // The bundled engine must be the ZS build: official 7-Zip cannot decode ZSTD 7z entries.
+        using (var codecs = Process.Start(new ProcessStartInfo(exe, "i")
+               { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true })!)
+        {
+            string capabilities = await codecs.StandardOutput.ReadToEndAsync() + await codecs.StandardError.ReadToEndAsync();
+            await codecs.WaitForExitAsync();
+            Check(capabilities.Contains("ZSTD", StringComparison.Ordinal), "bundled engine exposes ZSTD codec");
+        }
         var listing = await Task.Run(() => engine.List(archive, null));
         Check(listing.Status == ArchiveListStatus.Ok, "list fixture");
         var actual = ArchiveSelectionPlan.Create(listing.Entries, new[] { E("data", true) });
@@ -106,6 +114,35 @@ internal static class Program
             finally { ReleaseStgMedium(ref medium); }
         }
         Check(preparations == 1, "materialize once");
+
+        // A deep staging root plus a long entry name exceeds MAX_PATH (260). 7-Zip writes it
+        // fine, but Shell's SHCreateStreamOnFileEx needs the \\?\ prefix to serve the stream.
+        string longRoot = root;
+        while (longRoot.Length < 225) longRoot = Path.Combine(longRoot, "deep-" + new string('x', 30));
+        string longName = new string('a', 40) + ".bin";
+        string longFile = Path.Combine(longRoot, longName);
+        Directory.CreateDirectory(longRoot);
+        File.WriteAllText(longFile, "long");
+        Check(longFile.Length > 260, $"long path fixture length {longFile.Length}");
+        var longEntry = E(longName, false, 4);
+        var longPlan = ArchiveSelectionPlan.Create(new[] { longEntry }, new[] { longEntry });
+        var longData = new ArchiveDragDataObject(longPlan, () => Task.FromResult(longRoot));
+        var longFormat = F(ArchiveDragDataObject.ContentsFormat, TYMED.TYMED_ISTREAM, 0);
+        longData.GetData(ref longFormat, out var longMedium);
+        try
+        {
+            var stream = (IStream)Marshal.GetObjectForIUnknown(longMedium.unionmember);
+            try { stream.Stat(out var stat, 1); Check(stat.cbSize == 4, "stream opens for path beyond MAX_PATH"); }
+            finally { Marshal.ReleaseComObject(stream); }
+        }
+        finally { ReleaseStgMedium(ref longMedium); }
+
+        string longTarget = Path.Combine(root, "shell-long");
+        Directory.CreateDirectory(longTarget);
+        ShellCopy.Copy(longData, longTarget);
+        Check(File.ReadAllText(Path.Combine(longTarget, longName)) == "long",
+            "Windows Shell copies a virtual file staged beyond MAX_PATH");
+
         string shellTarget = Path.Combine(root, "shell-copy");
         Directory.CreateDirectory(shellTarget);
         ShellCopy.Copy(data, shellTarget);

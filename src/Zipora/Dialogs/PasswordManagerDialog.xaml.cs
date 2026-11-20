@@ -59,8 +59,9 @@ public partial class PasswordManagerDialog : FluentWindow
     private void LockVault_Click(object sender, RoutedEventArgs e) { PasswordStore.Lock(); Close(); }
     private void ImportLocal_Click(object sender, RoutedEventArgs e)
     {
-        if (System.Windows.MessageBox.Show(this, "将此 Windows 用户在普通版保存的密码复制到便携密码库？原密码库不会被修改。",
-            "导入本机密码", System.Windows.MessageBoxButton.YesNo, MessageBoxImage.Question) != System.Windows.MessageBoxResult.Yes) return;
+        if (!NoticeDialog.Confirm("导入本机密码",
+            "将此 Windows 用户在普通版保存的密码复制到便携密码库？原密码库不会被修改。",
+            NoticeKind.Info, "导入", "取消", owner: this)) return;
         try { int count = PasswordStore.ImportFromCurrentWindowsUser(); RefreshList(); StatusText.Text = $"已导入 {count} 个密码。"; }
         catch (Exception ex) { StatusText.Text = "未导入：" + ex.Message; }
     }

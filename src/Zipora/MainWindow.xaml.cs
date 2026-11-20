@@ -45,6 +45,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private bool _needsPassword;
     private bool _headerEncrypted;    // 文件名也加密，未拿到密码前列不出目录
     private bool _archiveRiskPromptShown;
+    private bool _skeletonVisible;   // 骨架屏淡出期间 Visibility 仍是 Visible，用它判断真实状态
+    private bool _progressVisible;   // 同上：进度条淡出期间不能只靠 Visibility 判断
+    private bool _emptyStateVisible = true;  // 构造阶段空态已直接可见
+    private bool _fileListVisible;           // 列表淡出期间 Visibility 仍是 Visible，用它判断真实状态
     private int _lastProgressPct = -1;
     private string _currentDirectory = "";
 
@@ -131,7 +135,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             if (_marqueePending || _marqueeActive) { CancelMarquee(); e.Handled = true; }
         };
         FileList.IsEnabledChanged += (_, _) => { if (!FileList.IsEnabled) CancelMarquee(); };
-        Deactivated += (_, _) => { if (!_dragActive) { CancelMarquee(); ResetTreeDragGesture(); } };
+        Deactivated += (_, _) =>
+        {
+            if (!_dragActive) { CancelMarquee(); ResetTreeDragGesture(); }
+            // 拖拽被 Esc 或其它窗口打断时不一定收到 DragLeave，这里兜底收起提示层。
+            SetDropHint(false);
+        };
 
         _engine = new SevenZipEngine(Path.Combine(AppContext.BaseDirectory, "7zip", "7z.exe"));
         _authStore = AuthStore.Load();
@@ -149,12 +158,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
         if (!_engine.IsAvailable)
         {
-            MessageBox.Show(this,
+            // 构造阶段窗口尚未显示，不能同步弹模态框；等首帧呈现后再提示。
+            Dispatcher.BeginInvoke(new Action(() => ShowNotice("找不到 7-Zip 引擎",
                 "找不到 7-Zip 引擎（7zip\\7z.exe）。\n请确认程序目录下存在 7zip 文件夹，解压功能将不可用。",
-                "Zipora", MessageBoxButton.OK, MessageBoxImage.Warning);
+                NoticeKind.Warning)), System.Windows.Threading.DispatcherPriority.Loaded);
         }
 
-        ShowEmptyState(true);
+        // 构造阶段直接落到初始可见性，不播放动画（窗口尚未呈现）。
+        EmptyState.Visibility = Visibility.Visible;
+        FileList.Visibility = Visibility.Collapsed;
 
         if (archiveToOpen != null)
         {
@@ -313,10 +325,25 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void SetArchiveBrowserVisible(bool visible)
     {
-        ArchiveNavigator.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        CurrentDirectoryBar.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        bool changing = (ArchiveNavigator.Visibility == Visibility.Visible) != visible;
+        if (visible)
+        {
+            ArchiveNavigator.Visibility = Visibility.Visible;
+            CurrentDirectoryBar.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            Motion.Hide(ArchiveNavigator);
+            Motion.Hide(CurrentDirectoryBar);
+        }
         FileList.Margin = visible ? new Thickness(228, 36, 0, 2) : new Thickness(0, 2, 0, 0);
         MarqueeCanvas.Margin = visible ? new Thickness(228, 36, 0, 2) : new Thickness(0, 2, 0, 0);
+        if (visible && changing)
+        {
+            // 侧栏随压缩包打开出现：从左侧滑入，避免整块面板硬贴上来。
+            Motion.FadeIn(ArchiveNavigator, dx: -10, ms: 200, restart: true);
+            Motion.FadeIn(CurrentDirectoryBar, dy: -4, ms: 180, restart: true);
+        }
         if (CustomBackgroundImage.Visibility == Visibility.Visible)
             ApplyGlassCards();
     }
@@ -388,6 +415,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void NavigateArchiveDirectory(string directory)
     {
         ResetPointerGesture();
+        int previousDepth = _currentDirectory.Length == 0 ? 0 : _currentDirectory.Count(c => c == '/') + 1;
         _currentDirectory = NormalizeArchivePath(directory);
         _visibleEntries.Clear();
 
@@ -409,6 +437,11 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             : "压缩包根目录  ›  " + _currentDirectory.Replace("/", "  ›  ");
         NavigateUpButton.IsEnabled = _currentDirectory.Length > 0;
         FileList.SelectedItems.Clear();
+
+        // 进入子目录时内容自右侧轻轻推入，返回上级时自左侧推入，让层级变化有方向感。
+        int depth = _currentDirectory.Length == 0 ? 0 : _currentDirectory.Count(c => c == '/') + 1;
+        if (_fileListVisible)
+            Motion.FadeIn(FileList, dx: depth > previousDepth ? 12 : -12, ms: 170, restart: true);
     }
 
     private static string NormalizeArchivePath(string path)
@@ -431,41 +464,71 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     /// <summary>空态卡片显示/隐藏（列表有内容时隐藏）。</summary>
     private void ShowEmptyState(bool show)
     {
-        EmptyState.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        FileList.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
+        if (show)
+        {
+            if (!_emptyStateVisible)
+            {
+                _emptyStateVisible = true;
+                EmptyState.Visibility = Visibility.Visible;
+                Motion.FadeIn(EmptyState, dy: 10, ms: 220, restart: true);
+            }
+            if (_fileListVisible)
+            {
+                _fileListVisible = false;
+                Motion.FadeOut(FileList, 120, collapse: true);
+            }
+        }
+        else
+        {
+            if (_emptyStateVisible)
+            {
+                _emptyStateVisible = false;
+                Motion.FadeOut(EmptyState, 120, collapse: true);
+            }
+            // 取消可能仍在进行的淡出，避免旧回调稍后把列表重新折叠。
+            _fileListVisible = true;
+            Motion.Show(FileList);
+        }
     }
 
     /// <summary>进入骨架屏状态：显示 12 行流光占位，隐藏空态与真实列表。</summary>
     private void ShowSkeleton()
     {
-        ShowEmptyState(false);
-        FileList.Visibility = Visibility.Collapsed;
+        _skeletonVisible = true;
+        if (_emptyStateVisible)
+        {
+            _emptyStateVisible = false;
+            Motion.FadeOut(EmptyState, 120, collapse: true);
+        }
+        _fileListVisible = false;
+        Motion.Hide(FileList);
         SkeletonOverlay.ItemsSource = _skeletonRows;
-        SkeletonOverlay.Visibility = Visibility.Visible;
+        if (SkeletonOverlay.Visibility != Visibility.Visible)
+        {
+            SkeletonOverlay.Visibility = Visibility.Visible;
+            Motion.FadeIn(SkeletonOverlay, ms: 160, restart: true);
+        }
     }
 
     /// <summary>退出骨架屏状态：恢复列表与空态判断。</summary>
     private void HideSkeleton()
     {
-        SkeletonOverlay.Visibility = Visibility.Collapsed;
-        FileList.Visibility = Visibility.Visible;
+        _skeletonVisible = false;
+        if (SkeletonOverlay.Visibility == Visibility.Visible)
+            Motion.FadeOut(SkeletonOverlay, 140, collapse: true);
+        _fileListVisible = true;
+        Motion.Show(FileList);
         ShowEmptyState(_archivePath == null && _visibleEntries.Count == 0);
     }
 
     /// <summary>列表条目变化后刷新空态可见性（带淡入动画）。</summary>
     private void RefreshListVisualState(bool animateIn)
     {
-        ShowEmptyState(_archivePath == null && _visibleEntries.Count == 0 && SkeletonOverlay.Visibility != Visibility.Visible);
+        ShowEmptyState(_archivePath == null && _visibleEntries.Count == 0 && !_skeletonVisible);
         if (animateIn && _visibleEntries.Count > 0)
         {
             // 列表卡片内容淡入 + 轻微上移，营造内容「就位」感
-            FileList.BeginAnimation(OpacityProperty,
-                new DoubleAnimation(0, 1, TimeSpan.FromSeconds(0.25)));
-            var tf = new TranslateTransform();
-            FileList.RenderTransform = tf;
-            tf.BeginAnimation(TranslateTransform.YProperty,
-                new DoubleAnimation(8, 0, TimeSpan.FromSeconds(0.25))
-                { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+            Motion.FadeIn(FileList, dy: 10, ms: 240, restart: true);
         }
     }
 
@@ -551,12 +614,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         string ext = Path.GetExtension(full).ToLowerInvariant();
         if (ext is ".exe" or ".bat" or ".cmd" or ".com" or ".msi")
         {
-            var r = MessageBox.Show(this,
+            bool proceed = NoticeDialog.Confirm("运行提醒",
                 "该文件是从压缩包内直接提取到临时目录运行的。\n\n" +
                 "它可能需要同目录下的其他文件（DLL、配置等）才能正常运行，" +
                 "直接从压缩包运行可能报错或无法启动。\n\n建议先「解压到…」后再运行。是否仍要打开？",
-                "Zipora — 运行提醒", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-            if (r != MessageBoxResult.Yes)
+                NoticeKind.Warning, "仍然打开", "取消", owner: this);
+            if (!proceed)
             {
                 Status("已取消打开该程序。");
                 return;
@@ -570,8 +633,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, "打开文件失败：" + ex.Message, "Zipora",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowNotice("打开文件失败", ex.Message, NoticeKind.Error);
         }
     }
 
@@ -623,6 +685,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private async void Window_Drop(object sender, DragEventArgs e)
     {
         e.Handled = true;
+        SetDropHint(false);
         if (_busyCts != null || _dragActive) return;
         if (e.Data.GetDataPresent(DataFormats.FileDrop)
             && e.Data.GetData(DataFormats.FileDrop) is string[] files
@@ -638,10 +701,36 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void Window_DragOver(object sender, DragEventArgs e)
     {
-        e.Effects = _busyCts == null && !_dragActive && e.Data.GetDataPresent(DataFormats.FileDrop)
-            ? DragDropEffects.Copy
-            : DragDropEffects.None;
+        bool canDrop = _busyCts == null && !_dragActive && e.Data.GetDataPresent(DataFormats.FileDrop);
+        e.Effects = canDrop ? DragDropEffects.Copy : DragDropEffects.None;
+        SetDropHint(canDrop);
         e.Handled = true;
+    }
+
+    private void Window_DragLeave(object sender, DragEventArgs e)
+    {
+        // DragLeave 会在跨过子元素时频繁触发，只有真正离开窗口才收起提示。
+        var point = e.GetPosition(this);
+        if (point.X < 0 || point.Y < 0 || point.X > ActualWidth || point.Y > ActualHeight)
+            SetDropHint(false);
+    }
+
+    private bool _dropHintVisible;
+
+    /// <summary>拖入文件时显示一层轻提示；不拦截鼠标，松手由 Window_Drop 正常处理。</summary>
+    private void SetDropHint(bool show)
+    {
+        if (_dropHintVisible == show) return;
+        _dropHintVisible = show;
+        if (show)
+        {
+            DropHint.Visibility = Visibility.Visible;
+            Motion.FadeIn(DropHint, dy: 6, ms: 160, restart: true);
+        }
+        else
+        {
+            Motion.FadeOut(DropHint, 130, collapse: true);
+        }
     }
 
     private void FileList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -672,7 +761,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _busyCts = cancellation;
         _dragActive = true;
         SetWorkEnabled(false);
-        CancelButton.Visibility = Visibility.Visible;
+        Motion.Show(CancelButton);
+        Motion.FadeIn(CancelButton, dy: 3, ms: 150, restart: true);
         try
         {
             async Task<string> Prepare()
@@ -682,9 +772,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 if (!TryPrepareExtractionSpace(rawRoot, selected, true, out var guard, cleanupOnStop: true))
                     throw new OperationCanceledException("临时空间不足，已取消拖放。", cancellation.Token);
                 Status($"正在提取 {plan.RootCount} 项，请保持目标窗口打开…");
-                Progress.Visibility = Visibility.Visible;
-                Progress.IsIndeterminate = true;
-                _lastProgressPct = -1;
+                ShowIndeterminateProgress();
                 var progress = new Progress<double>(p => SetProgress(p, "解压"));
                 var result = await _engine.ExtractSelectedAsync(archive, password, rawRoot,
                     plan.ExtractionPaths, progress, cancellation.Token, guard);
@@ -739,7 +827,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _busyCts = null;
             _dragActive = false;
             HideProgress();
-            CancelButton.Visibility = Visibility.Collapsed;
+            Motion.FadeOut(CancelButton, 120, collapse: true);
             SetWorkEnabled(true);
             ResetPointerGesture();
             ResetTreeDragGesture();
@@ -752,6 +840,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         ToolbarCard.IsEnabled = enabled;
         FileListCard.IsEnabled = enabled;
         // StatusCard remains enabled so Cancel is usable.
+    }
+
+    /// <summary>让工具栏动作按钮带淡入出现，避免打开压缩包时整排按钮硬插入。</summary>
+    private static void RevealAction(UIElement button)
+    {
+        bool wasHidden = button.Visibility != Visibility.Visible;
+        button.Visibility = Visibility.Visible;
+        if (wasHidden && button is FrameworkElement element)
+            Motion.FadeIn(element, dy: 4, ms: 180, restart: true);
     }
 
     // ---------- 拖出解压 + 框选（选中条目拖出窗口即解压到目标位置） ----------
@@ -1267,8 +1364,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
             default:
                 HideSkeleton();
-                MessageBox.Show(this, list.ErrorMessage, "Zipora",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowNotice("无法读取压缩包", list.ErrorMessage, NoticeKind.Error);
                 ReturnAfterOpenFailure();
                 return;
         }
@@ -1295,9 +1391,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             HideSkeleton();
             UpdateArchiveSummaryStatus();
             RefreshListVisualState(animateIn: true);
-            DetailsButton.Visibility = Visibility.Visible;
-            IntegrityButton.Visibility = Visibility.Visible;
-            ExtractButton.Visibility = Visibility.Visible;
+            RevealAction(DetailsButton);
+            RevealAction(IntegrityButton);
+            RevealAction(ExtractButton);
             return;
         }
 
@@ -1317,9 +1413,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             else
             {
                 Status("未提供密码，加密内容无法解压。");
-                DetailsButton.Visibility = Visibility.Visible;
-                IntegrityButton.Visibility = Visibility.Visible;
-            ExtractButton.Visibility = Visibility.Visible;
+                RevealAction(DetailsButton);
+                RevealAction(IntegrityButton);
+                RevealAction(ExtractButton);
             }
             return;
         }
@@ -1333,8 +1429,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             if (relist.Status != ArchiveListStatus.Ok)
             {
                 HideSkeleton();
-                MessageBox.Show(this, "密码验证通过，但读取文件列表失败：" + relist.ErrorMessage,
-                    "Zipora", MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowNotice("无法读取文件列表",
+                    "密码验证通过，但读取文件列表失败：" + relist.ErrorMessage, NoticeKind.Error);
                 ReturnAfterOpenFailure();
                 return;
             }
@@ -1358,9 +1454,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
         HideSkeleton();
         RefreshListVisualState(animateIn: true);
-        DetailsButton.Visibility = Visibility.Visible;
-        IntegrityButton.Visibility = Visibility.Visible;
-            ExtractButton.Visibility = Visibility.Visible;
+        RevealAction(DetailsButton);
+        RevealAction(IntegrityButton);
+        RevealAction(ExtractButton);
         string source = _fromCrack ? "字典破解" : _passwordFromUser ? "手动输入" : "来自云端";
         _fromCrack = false;
         UpdateArchiveSummaryStatus($"密码已就绪（{source}）");
@@ -1433,14 +1529,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                     return pwd;
 
                 case PasswordTestResult.WrongPassword:
-                    MessageBox.Show(this, "密码错误，请重试。", "Zipora",
-                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    ShowNotice("密码错误", "密码错误，请重试。", NoticeKind.Warning);
                     info = "上一次输入的密码不正确，请重试。";
                     continue;
 
                 default:
-                    MessageBox.Show(this, "验证密码时出错，压缩包可能已损坏。", "Zipora",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    ShowNotice("密码验证失败", "验证密码时出错，压缩包可能已损坏。", NoticeKind.Error);
                     continue;
             }
         }
@@ -1543,8 +1637,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (_busyCts != null)
         {
-            MessageBox.Show(this, "正在处理任务，请稍候。", "Zipora",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            ShowNotice("请稍候", "正在处理任务，请稍候。", NoticeKind.Info);
             return;
         }
         var dlg = new CloudSearchDialog(_deviceFp, _md5) { Owner = this };
@@ -1602,8 +1695,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             }
             if (!result.Success)
             {
-                MessageBox.Show(this, result.Message, "Zipora",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowNotice("创建压缩包失败", result.Message, NoticeKind.Error);
                 Status("创建失败。");
                 return;
             }
@@ -1640,8 +1732,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
         // 询问放在 busy 区外，避免点「是」时被任务占用拦截
         if (ok &&
-            MessageBox.Show(this, "压缩包创建完成。\n\n是否立即打开查看？", "Zipora",
-                MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            NoticeDialog.Confirm("压缩包创建完成", "压缩包创建完成。\n\n是否立即打开查看？",
+                NoticeKind.Success, "打开查看", "稍后", owner: this))
         {
             await OpenArchiveAsync(dlg.VolumeSizeBytes.HasValue ? outFile + ".001" : outFile);
         }
@@ -1764,9 +1856,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             try
             {
                 Status("正在解压所选内容…");
-                Progress.Visibility = Visibility.Visible;
-                Progress.IsIndeterminate = true;
-                _lastProgressPct = -1;
+                ShowIndeterminateProgress();
                 var result = await _engine.ExtractSelectedAsync(archive, password, raw,
                     plan.ExtractionPaths, new Progress<double>(p => SetProgress(p, "解压")), ct, guard);
                 if (result.Cancelled) { Status("解压已取消，未生成目标文件夹。"); return; }
@@ -2087,31 +2177,49 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (i == _lastProgressPct) return;
         _lastProgressPct = i;
 
-        Progress.Visibility = Visibility.Visible;
-        ProgressText.Visibility = Visibility.Visible;
+        if (!_progressVisible) EnsureProgressVisible();
         Progress.Value = i;
         ProgressText.Text = $"{label} {i}%";
     }
 
+    /// <summary>进度条首次出现时淡入；indeterminate 与百分比共用同一套显隐状态。</summary>
+    private void ShowIndeterminateProgress()
+    {
+        Progress.IsIndeterminate = true;
+        _lastProgressPct = -1;
+        EnsureProgressVisible();
+    }
+
+    private void EnsureProgressVisible()
+    {
+        if (_progressVisible) return;
+        _progressVisible = true;
+        Progress.Visibility = Visibility.Visible;
+        ProgressText.Visibility = Visibility.Visible;
+        Motion.FadeIn(Progress, ms: 140, restart: true);
+        Motion.FadeIn(ProgressText, ms: 140, restart: true);
+    }
+
     private void HideProgress()
     {
+        _progressVisible = false;
         Progress.IsIndeterminate = false;
-        Progress.Visibility = Visibility.Collapsed;
-        ProgressText.Visibility = Visibility.Collapsed;
+        Motion.FadeOut(Progress, 120, collapse: true);
+        Motion.FadeOut(ProgressText, 120, collapse: true);
     }
 
     private async Task RunBusyAsync(Func<CancellationToken, Task> work)
     {
         if (_busyCts != null)
         {
-            MessageBox.Show(this, "正在处理上一个任务，请稍候。", "Zipora",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            ShowNotice("请稍候", "正在处理上一个任务，请稍候。", NoticeKind.Info);
             return;
         }
 
         _busyCts = new CancellationTokenSource();
         SetWorkEnabled(false);
         CancelButton.Visibility = Visibility.Visible;
+        Motion.FadeIn(CancelButton, dy: 3, ms: 150, restart: true);
         try
         {
             await work(_busyCts.Token);
@@ -2122,15 +2230,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, "发生错误：" + ex.Message, "Zipora",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowNotice("发生错误", ex.Message, NoticeKind.Error);
             Status("发生错误。");
         }
         finally
         {
             HideProgress();
             SetWorkEnabled(true);
-            CancelButton.Visibility = Visibility.Collapsed;
+            Motion.FadeOut(CancelButton, 120, collapse: true);
             _busyCts.Dispose();
             _busyCts = null;
             if (_closeWhenIdle) Close();

@@ -57,7 +57,8 @@ public partial class SettingsDialog : FluentWindow
         // and the requested item can already be partly visible.
         var point = section.TransformToAncestor(SettingsScrollViewer)
             .Transform(new Point(0, 0));
-        SettingsScrollViewer.ScrollToVerticalOffset(
+        // 目录跳转用短缓动而不是瞬移，长设置页里更容易跟上位置变化。
+        Behaviors.SmoothWheelScroll.AnimateTo(SettingsScrollViewer,
             Math.Max(0, SettingsScrollViewer.VerticalOffset + point.Y - 2));
     }
 
@@ -280,8 +281,9 @@ public partial class SettingsDialog : FluentWindow
         {
             AppStorage.Log("Protection preference save failed: " + ex);
             if (AppStorage.IsPortable) AppStorage.ReportSaveFailure(ex);
-            else System.Windows.MessageBox.Show("设置已在本次会话生效，但未能保存。请检查目录权限和可用空间。\n\n" + ex.Message,
-                "设置未保存", System.Windows.MessageBoxButton.OK, MessageBoxImage.Warning);
+            else NoticeDialog.Show("设置未保存",
+                "设置已在本次会话生效，但未能保存。请检查目录权限和可用空间。\n\n" + ex.Message,
+                NoticeKind.Warning);
         }
     }
     private void Backdrop_Changed(object sender, RoutedEventArgs e)

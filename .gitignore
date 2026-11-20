@@ -28,3 +28,5 @@ config.json
 portable.json
 src/Zipora/7zip/*
 !src/Zipora/7zip/License.txt
+!src/Zipora/7zip/NOTICE-ZS.txt
+!src/Zipora/7zip/readme.txt

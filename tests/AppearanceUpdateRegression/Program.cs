@@ -9,6 +9,7 @@ using Zipora.Dialogs;
 internal static class Program
 {
     private static int checks;
+    private static string outputRoot = "";
     private static void Expect(bool condition, string name) { if (!condition) throw new Exception(name); checks++; }
     private static BitmapSource ColorImage(byte r, byte g, byte b, int w = 320, int h = 640)
     {
@@ -26,6 +27,8 @@ internal static class Program
     {
         string root = Path.GetFullPath(args[0]);
         if (Directory.Exists(root)) throw new Exception("Use a new output directory");
+        outputRoot = root;
+        CheckDialogSources();
         Directory.CreateDirectory(Path.Combine(root, "App"));
         File.WriteAllText(Path.Combine(root, "portable.json"), "{}");
         AppStorage.Initialize(Path.Combine(root, "App"));
@@ -40,6 +43,8 @@ internal static class Program
             resources.SetAttributeValue(System.Xml.Linq.XNamespace.Xmlns + "ui", "http://schemas.lepo.co/wpfui/2022/xaml");
             resources.SetAttributeValue(System.Xml.Linq.XNamespace.Xmlns + "x", "http://schemas.microsoft.com/winfx/2006/xaml");
             app.Resources = (ResourceDictionary)System.Windows.Markup.XamlReader.Parse(resources.ToString().Replace("Source=\"Themes/Zipora.xaml\"", "Source=\"/Zipora;component/Themes/Zipora.xaml\""));
+            app.Resources.MergedDictionaries.Add(new ResourceDictionary
+                { Source = new Uri("/Zipora;component/Themes/Light.xaml", UriKind.Relative) });
             ThemeManager.Init("Light");
             var now = new DateTimeOffset(2026, 11, 2, 0, 0, 0, TimeSpan.Zero);
             Expect(!UpdateChecker.IsDue(UpdateFrequency.Never, null, now), "never disables first check");
@@ -126,6 +131,11 @@ internal static class Program
             var dictionaryBox = (System.Windows.Controls.ComboBox)dictionary.FindName("DictBox");
             Expect(dictionaryBox.Items.Count == 0 && dictionaryBox.SelectedIndex == -1 && !dictionaryBox.IsEnabled, "empty dictionaries do not select a browse action during construction");
             Expect(((System.Windows.Controls.TextBlock)dictionary.FindName("DictHint")).Visibility == Visibility.Visible, "empty dictionary hint is visible");
+            var startLineBox = (System.Windows.Controls.TextBox)dictionary.FindName("StartLineBox");
+            var stopContinueButton = (System.Windows.Controls.Button)dictionary.FindName("StopContinueButton");
+            Expect(startLineBox.Text == "1", "dictionary start line defaults to 1");
+            Expect(stopContinueButton != null && stopContinueButton.Content as string == "继续" && !stopContinueButton.IsEnabled,
+                "single stop/continue button starts as a disabled Continue");
             var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
             var refresh = typeof(DictionaryCrackDialog).GetMethod("LoadBuiltinDictionaries", flags)!;
             var select = typeof(DictionaryCrackDialog).GetMethod("SelectDictionaryFile", flags)!;
@@ -155,6 +165,37 @@ internal static class Program
             cloud.Loaded += (_, _) => cloud.Dispatcher.BeginInvoke(() => cloud.Close(), DispatcherPriority.ApplicationIdle);
             cloud.ShowDialog();
             Expect(true, "cloud search window opens without making a query request");
+            var passwordDialog = new PasswordDialog("测试压缩包.zip", "该压缩包已加密，请输入密码。", true) { Owner = main };
+            passwordDialog.Loaded += (_, _) => passwordDialog.Dispatcher.BeginInvoke(() =>
+            {
+                var buttons = (Wpf.Ui.Controls.Button)passwordDialog.FindName("SavedPasswordButton");
+                var passwordBox = (Wpf.Ui.Controls.PasswordBox)passwordDialog.FindName("PasswordBox");
+                passwordBox.ApplyTemplate();
+                var reveal = FindChild<Wpf.Ui.Controls.Button>(passwordBox, "RevealButton");
+                Expect(buttons.HorizontalAlignment == HorizontalAlignment.Right, "saved-password picker sits on the right edge");
+                Expect(buttons.ActualWidth >= 24 && buttons.ActualHeight >= 24, "saved-password picker keeps a full-size hit target");
+                Expect(reveal != null, "reveal button is present for comparison");
+                if (reveal != null)
+                {
+                    Expect(buttons.ActualWidth == reveal.ActualWidth && buttons.ActualHeight == reveal.ActualHeight,
+                        "saved-password picker matches the reveal button size");
+                    Expect(buttons.CornerRadius == reveal.CornerRadius, "saved-password picker matches the reveal button radius");
+                    Expect(buttons.MouseOverBackground?.ToString() == reveal.MouseOverBackground?.ToString(),
+                        "saved-password picker matches the reveal button hover wash");
+                    Expect(buttons.PressedBackground?.ToString() == reveal.PressedBackground?.ToString(),
+                        "saved-password picker matches the reveal button pressed wash");
+                    var savedPoint = buttons.TranslatePoint(new Point(0, 0), passwordBox);
+                    var revealPoint = reveal.TranslatePoint(new Point(0, 0), passwordBox);
+                    Expect(savedPoint.Y == revealPoint.Y, "saved-password picker is vertically aligned with the reveal button");
+                    Expect(savedPoint.X + buttons.ActualWidth <= revealPoint.X, "saved-password picker sits left of the reveal button without overlap");
+                }
+                var capture = new RenderTargetBitmap((int)passwordDialog.ActualWidth, (int)passwordDialog.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+                capture.Render(passwordDialog); var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(capture));
+                using (var file = File.Create(Path.Combine(root, "password-dialog.png"))) encoder.Save(file);
+                passwordDialog.Close();
+            }, DispatcherPriority.ApplicationIdle);
+            passwordDialog.ShowDialog();
+            Expect(true, "password dialog opens with the saved-password picker on the right");
             main.Close();
             var large = BackgroundImages.Read(BackgroundImages.Save(ColorImage(0, 0, 255, 3000, 2000)));
             Expect(large.PixelWidth <= 2560 && large.PixelHeight <= 2560, "managed background is bounded for USB and memory usage");
@@ -171,6 +212,7 @@ internal static class Program
         notice.Loaded += (_, _) => notice.Dispatcher.BeginInvoke(() =>
         {
             Expect(((System.Windows.Controls.Button)notice.FindName("PrimaryButton")).IsDefault, "normal notice has Enter default");
+            Capture(notice, Path.Combine(outputRoot, "notice-dialog.png"));
             SendEscape(notice);
         }, DispatcherPriority.ApplicationIdle);
         Expect(notice.ShowDialog() == false, "Esc dismisses a single-button notice");
@@ -182,9 +224,41 @@ internal static class Program
             var secondary = (System.Windows.Controls.Button)danger.FindName("SecondaryButton");
             Expect(!primary.IsDefault && secondary.IsDefault && secondary.IsCancel, "danger confirmation defaults to the safe action");
             Expect(primary.TranslatePoint(new Point(0, primary.ActualHeight), danger).Y <= danger.ActualHeight, "long notice keeps footer visible");
+            Capture(danger, Path.Combine(outputRoot, "notice-confirm.png"));
             SendEscape(danger);
         }, DispatcherPriority.ApplicationIdle);
         Expect(danger.ShowDialog() == false, "Esc never accepts a dangerous action");
+
+        // 深色主题下同样要落在自建语义色板上，避免出现白底提示框。
+        var darkPalette = new ResourceDictionary
+            { Source = new Uri("/Zipora;component/Themes/Dark.xaml", UriKind.Relative) };
+        Application.Current.Resources.MergedDictionaries.Add(darkPalette);
+        ThemeManager.Init("Dark");
+        try
+        {
+            foreach (var (kind, title) in new[]
+                     {
+                         (NoticeKind.Info, "提示"), (NoticeKind.Success, "完成"),
+                         (NoticeKind.Warning, "注意"), (NoticeKind.Error, "错误"),
+                     })
+            {
+                var darkNotice = new NoticeDialog(title, "深色主题检查", kind) { Owner = main };
+                darkNotice.Loaded += (_, _) => darkNotice.Dispatcher.BeginInvoke(() =>
+                {
+                    var message = (System.Windows.Controls.TextBlock)darkNotice.FindName("MessageText");
+                    Expect(((SolidColorBrush)message.Foreground).Color == Color.FromRgb(0xA8, 0xA8, 0xA8),
+                        "dark notice body uses the secondary text token");
+                    Capture(darkNotice, Path.Combine(outputRoot, $"notice-dark-{kind}.png"));
+                    SendEscape(darkNotice);
+                }, DispatcherPriority.ApplicationIdle);
+                darkNotice.ShowDialog();
+            }
+        }
+        finally
+        {
+            Application.Current.Resources.MergedDictionaries.Remove(darkPalette);
+            ThemeManager.Init("Light");
+        }
 
         var settings = new SettingsDialog { Owner = main, ShowActivated = false };
         settings.Show(); settings.UpdateLayout();
@@ -220,11 +294,64 @@ internal static class Program
         settings.Close();
     }
 
+    private static void CheckDialogSources()
+    {
+        string sourceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../src/Zipora"));
+        Expect(Directory.Exists(sourceRoot), "source tree available for dialog checks");
+        var legacy = Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.EndsWith("NoticeDialog.xaml.cs", StringComparison.OrdinalIgnoreCase))
+            .Where(file => File.ReadAllText(file).Contains("MessageBox.Show", StringComparison.Ordinal))
+            .Select(Path.GetFileName)
+            .ToArray();
+        Expect(legacy.Length == 0, "no legacy MessageBox outside the NoticeDialog fallback: " + string.Join(", ", legacy));
+
+        // 启动早期的提示框可能成为唯一窗口；关闭它不能顺带结束整个进程。
+        string app = File.ReadAllText(Path.Combine(sourceRoot, "App.xaml.cs"));
+        Expect(app.Contains("ShutdownMode = ShutdownMode.OnExplicitShutdown;", StringComparison.Ordinal),
+            "startup guards against a lone notice dialog ending the process");
+        Expect(app.Contains("ShutdownMode = ShutdownMode.OnLastWindowClose;", StringComparison.Ordinal),
+            "normal last-window behavior is restored after the main window shows");
+
+        string dialogs = Path.Combine(sourceRoot, "Dialogs");
+        foreach (string file in Directory.EnumerateFiles(dialogs, "*.xaml", SearchOption.TopDirectoryOnly))
+        {
+            string xaml = File.ReadAllText(file);
+            string name = Path.GetFileName(file);
+            Expect(xaml.Contains("ExtendsContentIntoTitleBar=\"True\"", StringComparison.Ordinal), name + " extends the custom title bar");
+            Expect(xaml.Contains("<ui:TitleBar", StringComparison.Ordinal), name + " has a Fluent title bar");
+            Expect(xaml.Contains("WindowCornerPreference=\"Round\"", StringComparison.Ordinal), name + " has rounded window corners");
+            Expect(xaml.Contains("FontFamily=\"Microsoft YaHei UI\"", StringComparison.Ordinal), name + " uses the shared UI font");
+        }
+    }
+
+    private static void Capture(Window window, string path)
+    {
+        var bitmap = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(window);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var output = File.Create(path);
+        encoder.Save(output);
+    }
+
     private static void SendEscape(Window window)
     {
         window.RaiseEvent(new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,
             PresentationSource.FromVisual(window)!, Environment.TickCount, System.Windows.Input.Key.Escape)
             { RoutedEvent = System.Windows.Input.Keyboard.PreviewKeyDownEvent });
+    }
+
+    private static T? FindChild<T>(DependencyObject parent, string name) where T : FrameworkElement
+    {
+        int count = VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match && match.Name == name) return match;
+            var nested = FindChild<T>(child, name);
+            if (nested != null) return nested;
+        }
+        return null;
     }
 
     private static void RespondToToggle(SettingsDialog settings, Wpf.Ui.Controls.ToggleSwitch toggle, bool accept)

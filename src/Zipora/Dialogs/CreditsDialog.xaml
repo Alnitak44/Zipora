@@ -36,8 +36,9 @@
                 <Border Background="{DynamicResource ControlFillColorSecondaryBrush}" CornerRadius="6"
                         Padding="12,8" Margin="0,0,0,6">
                     <TextBlock FontSize="14">
-                        <Hyperlink NavigateUri="https://www.7-zip.org/"
-                                   RequestNavigate="Hyperlink_RequestNavigate">7-Zip</Hyperlink>
+                        <Hyperlink NavigateUri="https://github.com/mcmilk/7-Zip-zstd"
+                                   RequestNavigate="Hyperlink_RequestNavigate">7-Zip ZS</Hyperlink>
+                        <Run Text=" （基于 7-Zip）" Foreground="{DynamicResource ZiporaTextSecondary}"/>
                     </TextBlock>
                 </Border>
                 <Border Background="{DynamicResource ControlFillColorSecondaryBrush}" CornerRadius="6"

@@ -33,7 +33,7 @@ dotnet restore src/Zipora/Zipora.csproj
 dotnet build src/Zipora/Zipora.csproj -c Release
 ```
 
-7-Zip 引擎二进制 **不提交到源码仓库**。运行前，从 [7-Zip 官方网站](https://www.7-zip.org/) 获取 x64 版本，准备以下目录；可从本机 7-Zip 安装目录复制对应文件：
+7-Zip 引擎二进制 **不提交到源码仓库**。运行前，从 [7-Zip ZS 发布页](https://github.com/mcmilk/7-Zip-zstd/releases) 获取 x64 版本，准备以下目录；可从本机 7-Zip ZS 安装目录复制对应文件：
 
 ```text
 src/Zipora/7zip/
@@ -44,9 +44,9 @@ src/Zipora/7zip/
   License.txt
 ```
 
-本地验证使用 7-Zip 26.03，其他版本需自行回归。没有引擎仍可编译，启动时会提示缺失引擎。
+本地验证使用 7-Zip ZS 26.05（v1.5.7 R1），其他版本需自行回归。没有引擎仍可编译，启动时会提示缺失引擎。
 
-密码字典请自行在 `src/Zipora/dictionaries/` 新建 TXT，每行一个候选密码；不要提交自己的真实密码或私人字典。字典破解仅用于你有权访问的文件。
+仓库自带 `src/Zipora/dictionaries/常见密码字典.txt` 作为官方示例；也可以在 `src/Zipora/dictionaries/` 新建 TXT，每行一个候选密码。不要提交自己的真实密码或私人字典，字典破解仅用于你有权访问的文件。
 
 ### 普通版发布
 

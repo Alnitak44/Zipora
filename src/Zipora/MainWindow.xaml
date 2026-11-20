@@ -9,6 +9,7 @@
         Background="{DynamicResource ZiporaWindowSurface}"
         WindowCornerPreference="Round"
         AllowDrop="True" Drop="Window_Drop" DragOver="Window_DragOver" DragEnter="Window_DragOver"
+        DragLeave="Window_DragLeave"
         FontFamily="Microsoft YaHei UI" FontSize="13"
         TextOptions.TextRenderingMode="ClearType">
 
@@ -171,6 +172,7 @@
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  ScrollViewer.VerticalScrollBarVisibility="Visible"
                                  behaviors:AutoHideScrollBars.Enabled="True"
+                                 behaviors:SmoothWheelScroll.Enabled="True"
                                  VirtualizingPanel.ScrollUnit="Pixel"
                                  PreviewMouseLeftButtonDown="FileList_PreviewMouseLeftButtonDown"
                                  PreviewMouseMove="FileList_PreviewMouseMove"
@@ -387,6 +389,19 @@
                                 BorderThickness="1"/>
                     </Canvas>
                 </Grid>
+            </Border>
+
+            <!-- 拖入提示：文件悬停在窗口上方时淡入，明确告诉用户可以松手。 -->
+            <Border x:Name="DropHint" Grid.Row="1" Margin="2" CornerRadius="11" IsHitTestVisible="False"
+                    Background="{DynamicResource ZiporaDropHintBackground}"
+                    BorderBrush="{DynamicResource ZiporaAccentBrush}" BorderThickness="1.5"
+                    Visibility="Collapsed" Opacity="0">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24">
+                    <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="40" HorizontalAlignment="Center"
+                                   Foreground="{DynamicResource ZiporaAccentText}"/>
+                    <TextBlock Text="松开即可打开压缩包" FontSize="16" FontWeight="SemiBold" Margin="0,12,0,0"
+                               HorizontalAlignment="Center" Foreground="{DynamicResource ZiporaTextPrimary}"/>
+                </StackPanel>
             </Border>
 
             <!-- ========== 状态栏 ========== -->

@@ -35,7 +35,8 @@ if ($actual.ToString() -ne $Expected) { throw 'Incorrect storage mode' }
         $check | Set-Content -LiteralPath $checkPath -Encoding utf8
         & pwsh -NoProfile -File $checkPath $assemblyPath ($PortableMode.ToString())
         if ($LASTEXITCODE -ne 0) { throw 'Storage mode check failed.' }
-        foreach ($name in @('Zipora.exe','Zipora.ico','7zip/7z.exe','7zip/7z.dll','7zip/7z.sfx','7zip/License.txt')) {
+        foreach ($name in @('Zipora.exe','Zipora.ico','7zip/7z.exe','7zip/7z.dll','7zip/7z.sfx','7zip/License.txt','7zip/NOTICE-ZS.txt',
+            'dictionaries/common.txt','dictionaries/常见密码字典.txt')) {
             if (-not (Test-Path -LiteralPath (Join-Path $Output $name))) { throw "Missing component: $name" }
         }
     }
@@ -57,7 +58,7 @@ if ($actual.ToString() -ne $Expected) { throw 'Incorrect storage mode' }
 # Zipora Windows x64
 安装版：运行同版本 Setup-x64.exe，升级时会识别旧安装目录，保留 AppData 中的设置和密码库。
 ZIP 常规版：完整解压后运行 Zipora.exe，设置同样保存在 %APPDATA%/Zipora。
-包含 .NET 运行库及官方 7-Zip 引擎，不需要单独安装 .NET。
+包含 .NET 运行库及 7-Zip ZS 引擎，不需要单独安装 .NET。
 修改或删除已注册右键扩展的目录前，请先在设置中关闭右键菜单。
 源码与更新：https://github.com/Alnitak44/Zipora
 '@ | Set-Content "$standard/README-Usage.md" -Encoding utf8

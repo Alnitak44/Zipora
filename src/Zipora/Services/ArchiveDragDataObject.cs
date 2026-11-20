@@ -122,7 +122,11 @@ public sealed class ArchiveDragDataObject : IDataObject, IDataObjectAsyncCapabil
             var item = _plan.Items[format.lindex];
             if (item.IsDirectory) throw new COMException("Directory has no stream", unchecked((int)0x80040068));
             string path = ArchiveSelectionPlan.ResolveInside(PreparedDirectory(), item.ArchivePath);
-            Marshal.ThrowExceptionForHR(SHCreateStreamOnFileEx(path, 0x20, 0, false, IntPtr.Zero, out var stream));
+            // Shell's SHCreateStreamOnFileEx stops at MAX_PATH (260) and returns
+            // ERROR_PATH_NOT_FOUND (0x80070003); staging paths are longer than the archive's
+            // own paths, so long entries fail here even though 7-Zip extracted them fine.
+            // The extended-length prefix bypasses MAX_PATH without changing the file.
+            Marshal.ThrowExceptionForHR(SHCreateStreamOnFileEx(ExtendedPath(path), 0x20, 0, false, IntPtr.Zero, out var stream));
             try
             {
                 medium = new STGMEDIUM { tymed = TYMED.TYMED_ISTREAM,
@@ -178,6 +182,14 @@ public sealed class ArchiveDragDataObject : IDataObject, IDataObjectAsyncCapabil
     [DllImport("kernel32.dll")] private static extern IntPtr GlobalLock(IntPtr handle);
     [DllImport("kernel32.dll")] private static extern bool GlobalUnlock(IntPtr handle);
     [DllImport("ole32.dll")] internal static extern void ReleaseStgMedium(ref STGMEDIUM medium);
+
+    /// <summary>Adds the extended-length prefix for absolute local paths near/over MAX_PATH.</summary>
+    internal static string ExtendedPath(string path)
+    {
+        if (path.Length < 248 || path.StartsWith(@"\\?\", StringComparison.Ordinal)) return path;
+        if (path.StartsWith(@"\\", StringComparison.Ordinal)) return @"\\?\UNC\" + path[2..];
+        return @"\\?\" + path;
+    }
 }
 
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]

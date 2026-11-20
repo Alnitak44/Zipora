@@ -45,8 +45,8 @@
 
                 <TextBlock Margin="0,20,0,16" TextWrapping="Wrap" LineHeight="21"
                            Foreground="{DynamicResource ZiporaTextSecondary}">
-                    基于官方 7-Zip 引擎，支持查看、解压、创建、分卷处理与完整性校验；
-                    加密压缩包可选择使用 KeyFetch 云端查询与本地字典破解。
+                    基于 7-Zip ZS 引擎，支持查看、解压、创建、分卷处理与完整性校验；
+                    加密压缩包可选择使用云密码搜索与本地字典破解。
                 </TextBlock>
 
                 <Border Background="{DynamicResource ControlFillColorSecondaryBrush}" CornerRadius="8" Padding="14,4">
@@ -60,7 +60,7 @@
                             <ui:SymbolIcon Grid.Column="0" Symbol="Archive20" FontSize="17"
                                            Foreground="{DynamicResource ZiporaTextSecondary}"/>
                             <TextBlock Grid.Column="1" Text="压缩引擎" FontWeight="SemiBold"/>
-                            <TextBlock Grid.Column="2" Text="官方 7-Zip（7z.exe / 7z.dll）"
+                            <TextBlock Grid.Column="2" Text="7-Zip ZS 26.05（7z.exe / 7z.dll）"
                                        Foreground="{DynamicResource ZiporaTextSecondary}"/>
                         </Grid>
                         <Separator Margin="0,3"/>
@@ -72,8 +72,9 @@
                             </Grid.ColumnDefinitions>
                             <ui:SymbolIcon Grid.Column="0" Symbol="Cloud20" FontSize="17"
                                            Foreground="{DynamicResource ZiporaTextSecondary}"/>
-                            <TextBlock Grid.Column="1" Text="KeyFetch 云端" FontWeight="SemiBold"/>
+                            <TextBlock Grid.Column="1" Text="云密码搜索" FontWeight="SemiBold"/>
                             <TextBlock x:Name="CloudStateText" Grid.Column="2"
+                                       Text="依赖KeyFetch"
                                        Foreground="{DynamicResource ZiporaTextSecondary}"/>
                         </Grid>
                         <Separator Margin="0,3"/>
@@ -86,7 +87,7 @@
                             <ui:SymbolIcon Grid.Column="0" Symbol="Info20" FontSize="17"
                                            Foreground="{DynamicResource ZiporaTextSecondary}"/>
                             <TextBlock Grid.Column="1" Text="隐私说明" FontWeight="SemiBold"/>
-                            <TextBlock Grid.Column="2" Text="云端按文件 MD5 匹配；密码仅在验证正确后才可提交。"
+                            <TextBlock Grid.Column="2" Text="仅在许可情况下匿名上传"
                                        TextWrapping="Wrap"
                                        Foreground="{DynamicResource ZiporaTextSecondary}"/>
                         </Grid>

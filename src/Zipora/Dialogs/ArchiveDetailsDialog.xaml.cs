@@ -86,8 +86,7 @@ public partial class ArchiveDetailsDialog : Wpf.Ui.Controls.FluentWindow
         {
             ComputeSha256Button.IsEnabled = true;
             ComputeSha256Button.Content = "[重试]";
-            MessageBox.Show(this, "无法计算 SHA256：" + ex.Message, "Zipora",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            NoticeDialog.Show("无法计算 SHA256", ex.Message, NoticeKind.Error, this);
         }
         finally
         {

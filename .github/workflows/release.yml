@@ -20,11 +20,21 @@ jobs:
           $version = $xml.SelectSingleNode('/Project/PropertyGroup/Version').InnerText
           "VERSION=$version" >> $env:GITHUB_ENV
           "RELEASE_TAG=v$version" >> $env:GITHUB_ENV
+
+          # Licenses shipped alongside the portable distribution.
           Invoke-WebRequest 'https://github.com/Alnitak44/Zipora/releases/download/v2.0.33/Zipora-v2.0.33-win-x64-portable.zip' -OutFile engine-bundle.zip
           if ((Get-FileHash engine-bundle.zip -Algorithm SHA256).Hash -ne 'E06389148D7358135FC399A918C8211B4FDF5EEC7C4FF5B228D165EF02E31FD1') { throw 'Engine bundle checksum mismatch' }
           Expand-Archive engine-bundle.zip dependencies
-          foreach ($name in @('7z.exe','7z.dll','7z.sfx','7zCon.sfx','readme.txt','License.txt')) {
-            Copy-Item -LiteralPath (Join-Path 'dependencies/App/7zip' $name) -Destination 'src/Zipora/7zip'
+
+          # Zipora bundles 7-Zip ZS 26.05: the official 7-Zip build cannot decode
+          # ZSTD entries inside 7z archives (reported as Unsupported Method).
+          Invoke-WebRequest 'https://github.com/mcmilk/7-Zip-zstd/releases/download/v26.05-v1.5.7-R1/7z26.05-zstd-x64.exe' -OutFile 7z-zs-setup.exe
+          if ((Get-FileHash 7z-zs-setup.exe -Algorithm SHA256).Hash -ne '430E398037520A52A35DEDF45472EB3EA62073B7BF53BFDD37D2B663F50F5530') { throw '7-Zip ZS checksum mismatch' }
+          New-Item -ItemType Directory -Path engine-zs -Force | Out-Null
+          & "$env:ProgramFiles\7-Zip\7z.exe" x 7z-zs-setup.exe -oengine-zs -y
+          if ($LASTEXITCODE -ne 0) { throw '7-Zip ZS extraction failed' }
+          foreach ($name in @('7z.exe','7z.dll','7z.sfx','7zCon.sfx','License.txt')) {
+            Copy-Item -LiteralPath (Join-Path 'engine-zs' $name) -Destination 'src/Zipora/7zip'
           }
       - name: Build native Explorer extension
         shell: pwsh
@@ -48,6 +58,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Update dialog regression failed' }
           dotnet run --project tests/SelectionGestureRegression -c Release -- artifacts/selection-gesture-test
           if ($LASTEXITCODE -ne 0) { throw 'Selection gesture regression failed' }
+          dotnet run --project tests/MotionRegression -c Release -- artifacts/motion-test
+          if ($LASTEXITCODE -ne 0) { throw 'Motion regression failed' }
           dotnet run --project tests/PortableRegression -c Release -- artifacts/portable-test "$pwd/src/Zipora/7zip/7z.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Portable regression failed' }
           dotnet run --project tests/VisualStateRegression -c Release

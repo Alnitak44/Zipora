@@ -9,7 +9,7 @@
     <RootNamespace>Zipora</RootNamespace>
     <AssemblyName>Zipora</AssemblyName>
     <ApplicationIcon>Assets\Zipora.ico</ApplicationIcon>
-    <Version>2.0.48</Version>
+    <Version>2.0.49</Version>
     <Product>Zipora</Product>
     <Description>套壳 7-Zip 的解压工具，集成 KeyFetch 云端压缩包密码查询/共享</Description>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
@@ -19,7 +19,7 @@
     <DefineConstants>$(DefineConstants);PORTABLE</DefineConstants>
   </PropertyGroup>
 
-  <!-- 捆绑官方 7-Zip 引擎（7z.exe + 7z.dll），随程序输出到 7zip\ 子目录。
+  <!-- 捆绑 7-Zip ZS 引擎（7z.exe + 7z.dll），随程序输出到 7zip\ 子目录。
        7z.exe 必须与 7z.dll 以真实文件形式共存于同一目录，因此排除在单文件外。 -->
   <ItemGroup>
     <None Include="7zip\**\*" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
@@ -54,3 +54,4 @@
   </ItemGroup>
 
 </Project>
+

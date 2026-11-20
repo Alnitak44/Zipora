@@ -5,16 +5,34 @@ namespace Zipora.Services;
 /// <summary>One leased workspace per window; never collect another live instance.</summary>
 public sealed class TemporaryWorkspace : IDisposable
 {
+    // Short names keep staging paths well below MAX_PATH: archive entry names can be
+    // ~150 chars, and the old "session-<32>" + "drag-<32>" layout pushed the deepest
+    // file past 260, where Shell's SHCreateStreamOnFileEx returns 0x80070003.
+    private const string SessionPrefix = "s-";
+    private const string LeaseName = ".l";
     private readonly string _root;
     private readonly FileStream _lease;
     public TemporaryWorkspace()
     {
         string parent = AppStorage.TempRoot;
         Directory.CreateDirectory(parent);
-        _root = Path.Combine(parent, "session-" + Guid.NewGuid().ToString("N"));
+        _root = Path.Combine(parent, SessionPrefix + Guid.NewGuid().ToString("N")[..12]);
         Directory.CreateDirectory(_root);
-        _lease = new FileStream(Path.Combine(_root, ".lease"), FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
+        _lease = new FileStream(Path.Combine(_root, LeaseName), FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
         // Startup recovery only touches old, unlocked session directories from this implementation.
+        foreach (string candidate in Directory.EnumerateDirectories(parent, SessionPrefix + "*"))
+        {
+            try
+            {
+                if (!AppStorage.IsPortable && Directory.GetLastWriteTimeUtc(candidate) >= DateTime.UtcNow.AddDays(-1)) continue;
+                if ((File.GetAttributes(candidate) & FileAttributes.ReparsePoint) != 0) continue;
+                using (new FileStream(Path.Combine(candidate, LeaseName), FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+                DeleteTree(candidate);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        // Reclaim directories left by the previous, longer naming scheme.
         foreach (string candidate in Directory.EnumerateDirectories(parent, "session-*"))
         {
             try
@@ -31,7 +49,7 @@ public sealed class TemporaryWorkspace : IDisposable
     public string CreateDirectory(string purpose)
     {
         if (purpose is not ("drag" or "open" or "lists" or "create")) throw new ArgumentException("Unknown temporary purpose", nameof(purpose));
-        string path = Path.Combine(_root, purpose + "-" + Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(_root, purpose[..1] + Guid.NewGuid().ToString("N")[..10]);
         Directory.CreateDirectory(path);
         return path;
     }

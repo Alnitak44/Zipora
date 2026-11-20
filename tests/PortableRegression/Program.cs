@@ -28,6 +28,19 @@ internal static class Program
             catch { return 7; }
             finally { AppStorage.Dispose(); }
         }
+        if (args.Length > 0 && args[0] == "--seed")
+        {
+            try
+            {
+                AppStorage.Initialize(args[1]);
+                foreach (string path in Directory.EnumerateFiles(AppStorage.DictionaryRoot, "*.txt")
+                             .OrderBy(Path.GetFileName, StringComparer.Ordinal))
+                    Console.WriteLine(Path.GetFileName(path) + "=" + File.ReadAllText(path));
+                return 0;
+            }
+            catch { return 7; }
+            finally { AppStorage.Dispose(); }
+        }
         if (args.Length != 2) { Console.Error.WriteLine("Supply a NEW output directory and 7z.exe path."); return 2; }
         string output = Path.GetFullPath(args[0]);
         if (Directory.Exists(output)) { Console.Error.WriteLine("Output already exists; refusing to overwrite."); return 2; }
@@ -45,7 +58,29 @@ internal static class Program
             Expect(AppStorage.DataRoot == Path.Combine(root, "Data"), "Data stays beside App");
             Expect(AppStorage.TempRoot == Path.Combine(root, "Data", "Temp"), "temporary content stays on USB");
             Expect(File.ReadAllText(Path.Combine(AppStorage.DictionaryRoot, "common.txt")) == "test-only-dictionary", "editable dictionaries seeded into Data, not left in program files");
+            Expect(File.ReadAllText(Path.Combine(AppStorage.DictionaryRoot, ".initialized")).Contains("common.txt"), "seeded dictionary names are recorded for future upgrades");
             Expect(Path.GetTempPath().StartsWith(AppStorage.TempRoot, StringComparison.OrdinalIgnoreCase), "child process TEMP inherits USB path");
+
+            var lines = new[] { "123456", "", " 123456 ", "password", "  ", "qwerty" };
+            var all = DictionaryPlan.Build(lines, 1);
+            Expect(all.Count == 3 && all[0].Line == 1 && all[1].Line == 4 && all[2].Line == 6, "dictionary plan keeps original line numbers and drops duplicates/blank rows");
+            var fromFive = DictionaryPlan.Build(lines, 5);
+            Expect(fromFive.Count == 1 && fromFive[0].Password == "qwerty" && fromFive[0].Line == 6, "start line skips earlier rows");
+            Expect(DictionaryPlan.Build(lines, 7).Count == 0, "start line past the end yields no work");
+            Expect(Fails(() => DictionaryPlan.Build(lines, 0)), "start line below 1 is rejected");
+
+            string progressDict = Path.Combine(output, "progress-dict.txt");
+            File.WriteAllText(progressDict, "a\nb\nc\n");
+            string progressArchive = Path.Combine(output, "progress.zip");
+            File.WriteAllText(progressArchive, "fixture");
+            Expect(CrackProgressStore.Load(progressArchive, progressDict) == null, "no resume point before the first stop");
+            CrackProgressStore.Save(progressArchive, progressDict, 12);
+            Expect(CrackProgressStore.Load(progressArchive, progressDict) == 12, "resume line survives a reload");
+            File.AppendAllText(progressDict, "d\n");
+            Expect(CrackProgressStore.Load(progressArchive, progressDict) == null, "editing the dictionary invalidates the stale resume line");
+            CrackProgressStore.Save(progressArchive, progressDict, 3);
+            CrackProgressStore.Clear(progressArchive, progressDict);
+            Expect(CrackProgressStore.Load(progressArchive, progressDict) == null, "clearing removes the resume point");
             var layout = AppStorage.Layout;
             string inside = Path.Combine(root, "子目录", "test.zip");
             Expect(layout.DecodePath(layout.EncodePath(inside)) == inside, "install-relative path round trip");
@@ -167,6 +202,7 @@ internal static class Program
             {
                 live = workspace.CreateDirectory("drag");
                 Expect(StorageLayout.Within(live, AppStorage.TempRoot), "extraction workspace stays inside USB Data");
+                Expect(live.Length < AppStorage.TempRoot.Length + 30, $"staging path stays short ({live.Length} chars)");
                 Expect(!Directory.Exists(stale), "unlocked crash residue collected at next workspace creation");
                 using (var second = new TemporaryWorkspace())
                     Expect(Directory.Exists(live), "another live workspace is not collected");
@@ -193,10 +229,17 @@ internal static class Program
             Expect(engine.ExtractSelectedAsync(archive, null, extracted, ["source.txt"]).GetAwaiter().GetResult().Success, "real selected extraction uses portable list-file workspace");
             Expect(File.ReadAllText(Path.Combine(extracted, "source.txt")) == "portable engine fixture", "real extraction bytes are correct");
             Expect(engine.CreateAsync([source], Path.Combine(output, "fixture.tar.gz"), "gzip", null, 1, false).GetAwaiter().GetResult().Success, "two-stage compression uses portable tar workspace");
-            Expect(!Directory.EnumerateDirectories(AppStorage.TempRoot, "session-*").Any(), "engine temporary workspaces removed after completion");
+            Expect(!Directory.EnumerateDirectories(AppStorage.TempRoot, "s-*")
+                .Concat(Directory.EnumerateDirectories(AppStorage.TempRoot, "session-*")).Any(),
+                "engine temporary workspaces removed after completion");
             AppStorage.Dispose();
             Expect(PasswordStore.NeedsUnlock && !File.Exists(sentinel), "exit locks password vault and clears private cache");
             Expect(File.Exists(Path.Combine(extracted, "source.txt")), "exit never deletes user-selected extraction output");
+            File.WriteAllText(Path.Combine(app, "dictionaries", "new-built-in.txt"), "second-generation-dictionary");
+            string upgraded = ChildSeed(app);
+            Expect(upgraded.Contains("new-built-in.txt=second-generation-dictionary"), "upgrade seeds a newly bundled dictionary");
+            Expect(upgraded.Contains("common.txt=test-only-dictionary"), "upgrade keeps the existing user-editable dictionary");
+            Expect(File.ReadAllText(Path.Combine(AppStorage.DictionaryRoot, ".initialized")).Contains("new-built-in.txt"), "seeded names are remembered after an upgrade");
             Console.WriteLine($"PASS: {_checks} portable assertions. Output: {output}");
             return 0;
         }
@@ -211,5 +254,17 @@ internal static class Program
         using var process = Process.Start(info)!;
         if (!process.WaitForExit(10_000)) { process.Kill(true); throw new Exception("Child lease test timed out."); }
         return process.ExitCode;
+    }
+
+    private static string ChildSeed(string app)
+    {
+        var info = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
+        info.ArgumentList.Add("--seed");
+        info.ArgumentList.Add(app);
+        using var process = Process.Start(info)!;
+        string text = process.StandardOutput.ReadToEnd();
+        if (!process.WaitForExit(10_000)) { process.Kill(true); throw new Exception("Child seed test timed out."); }
+        if (process.ExitCode != 0) throw new Exception("Child seed test failed: " + process.ExitCode);
+        return text;
     }
 }

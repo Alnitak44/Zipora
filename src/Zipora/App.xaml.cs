@@ -2,6 +2,7 @@ using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Threading;
+using Zipora.Dialogs;
 using Zipora.Services;
 
 namespace Zipora;
@@ -17,14 +18,19 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // 启动早期可能只有提示框这一扇窗口（例如便携盘写入失败）。若沿用默认的
+        // 「最后一个窗口关闭即退出」，用户关掉提示框会把整个进程带走；
+        // 主窗口显示后再恢复默认行为。
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
         DispatcherUnhandledException += OnDispatcherUnhandledException;
-        AppStorage.SaveFailed += message => MessageBox.Show(message, "便携版设置未保存", MessageBoxButton.OK, MessageBoxImage.Warning);
+        AppStorage.SaveFailed += message => NoticeDialog.Show("便携版设置未保存", message, NoticeKind.Warning);
 
         try { AppStorage.Initialize(); }
         catch (Exception ex)
         {
-            MessageBox.Show("无法启动便携版。请检查 U 盘是否连接、可写、空间充足，且同一目录未运行另一个实例。\n\n" + ex.Message,
-                "Zipora Portable", MessageBoxButton.OK, MessageBoxImage.Warning);
+            NoticeDialog.Show("Zipora Portable",
+                "无法启动便携版。请检查 U 盘是否连接、可写、空间充足，且同一目录未运行另一个实例。\n\n" + ex.Message,
+                NoticeKind.Warning);
             Shutdown(1);
             return;
         }
@@ -93,6 +99,7 @@ public partial class App : Application
         var window = new MainWindow(archive);
         if (AppStorage.IsPortable) window.Title = "Zipora Portable";
         window.Show();
+        ShutdownMode = ShutdownMode.OnLastWindowClose;
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -115,15 +122,13 @@ public partial class App : Application
         {
             if (install) ContextMenuInstaller.Install();
             else ContextMenuInstaller.Uninstall();
-            MessageBox.Show(install
-                    ? "已启用 Zipora Explorer 菜单：右键文件或文件夹 →「Zipora」子菜单。"
-                    : "已从系统右键菜单移除。",
-                "Zipora", MessageBoxButton.OK, MessageBoxImage.Information);
+            NoticeDialog.Show("Zipora", install
+                ? "已启用 Zipora Explorer 菜单：右键文件或文件夹 →「Zipora」子菜单。"
+                : "已从系统右键菜单移除。", NoticeKind.Success);
         }
         catch (Exception ex)
         {
-            MessageBox.Show("操作失败：" + ex.Message, "Zipora",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            NoticeDialog.Show("操作失败", ex.Message, NoticeKind.Error);
         }
         Shutdown();
     }
@@ -132,8 +137,9 @@ public partial class App : Application
     {
         if (AppStorage.IsPortable && e.Exception is IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show("操作未完成，数据可能未保存。请检查 U 盘连接、写保护和剩余空间；不要继续拔插正在使用的 U 盘。\n\n" + e.Exception.Message,
-                "便携版存储不可用", MessageBoxButton.OK, MessageBoxImage.Warning);
+            NoticeDialog.Show("便携版存储不可用",
+                "操作未完成，数据可能未保存。请检查 U 盘连接、写保护和剩余空间；不要继续拔插正在使用的 U 盘。\n\n" + e.Exception.Message,
+                NoticeKind.Warning);
             e.Handled = true;
             return;
         }
@@ -149,7 +155,7 @@ public partial class App : Application
             // 记录失败不应掩盖原始异常。
         }
 
-        MessageBox.Show("发生未处理的错误，Zipora 将退出。\n\n" + e.Exception.Message,
-            "Zipora", MessageBoxButton.OK, MessageBoxImage.Error);
+        NoticeDialog.Show("Zipora", "发生未处理的错误，Zipora 将退出。\n\n" + e.Exception.Message,
+            NoticeKind.Error);
     }
 }

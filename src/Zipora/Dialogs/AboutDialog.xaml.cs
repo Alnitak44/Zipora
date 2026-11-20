@@ -12,7 +12,6 @@ public partial class AboutDialog : Wpf.Ui.Controls.FluentWindow
     {
         InitializeComponent();
         VersionText.Text = $"版本 {AppInfo.Version}";
-        CloudStateText.Text = "已向所有用户开放（每日额度限制仍生效）";
         Backdrop.ApplyFromSetting(this);
     }
 
@@ -21,8 +20,8 @@ public partial class AboutDialog : Wpf.Ui.Controls.FluentWindow
         string licensePath = Path.Combine(AppContext.BaseDirectory, "7zip", "License.txt");
         if (!File.Exists(licensePath))
         {
-            MessageBox.Show(this, "未找到随程序附带的 7-Zip 许可证文件。", "Zipora",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            NoticeDialog.Show("未找到许可证", "未找到随程序附带的 7-Zip 许可证文件。",
+                NoticeKind.Info, this);
             return;
         }
 
@@ -32,8 +31,7 @@ public partial class AboutDialog : Wpf.Ui.Controls.FluentWindow
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, "无法打开许可证文件：" + ex.Message, "Zipora",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            NoticeDialog.Show("无法打开许可证文件", ex.Message, NoticeKind.Error, this);
         }
     }
 }

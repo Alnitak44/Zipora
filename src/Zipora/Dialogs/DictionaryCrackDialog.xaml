@@ -54,7 +54,7 @@
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <ComboBox x:Name="DictBox" Grid.Column="0"
+                        <ComboBox x:Name="DictBox" Grid.Column="0" SelectionChanged="DictBox_SelectionChanged"
                                   ToolTip="展开选择内置字典（程序目录 dictionaries\ 下），或浏览其他文件">
                             <ComboBox.ItemTemplate>
                                 <DataTemplate>
@@ -89,7 +89,7 @@
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="线程数" VerticalAlignment="Center" Margin="0,0,8,0"
                                    Style="{StaticResource SecondaryText}"/>
@@ -101,12 +101,21 @@
                             <ComboBoxItem Content="12"/>
                             <ComboBoxItem Content="16"/>
                         </ComboBox>
-                        <ui:Button x:Name="StartButton" Grid.Column="2" Margin="16,0,0,0"
-                                   Style="{StaticResource DialogPrimaryButton}"
-                                   Click="Start_Click" Content="开始破解"/>
-                        <ui:Button x:Name="StopButton" Grid.Column="3" Margin="8,0,0,0" HorizontalAlignment="Left"
-                                   Style="{StaticResource DialogSecondaryButton}"
-                                   Click="Stop_Click" Content="停止" IsEnabled="False"/>
+                        <TextBlock Grid.Column="2" Text="起始行" VerticalAlignment="Center" Margin="18,0,8,0"
+                                   Style="{StaticResource SecondaryText}"/>
+                        <ui:TextBox x:Name="StartLineBox" Grid.Column="3" Width="88" Text="1"
+                                    VerticalAlignment="Center"
+                                    ToolTip="从字典文件的第几行开始（默认 1，按文件原始行号）"/>
+                    </Grid>
+
+                    <Grid Margin="0,10,0,0">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <ui:Button x:Name="StartButton" Style="{StaticResource DialogPrimaryButton}"
+                                       Click="Start_Click" Content="开始破解"/>
+                            <ui:Button x:Name="StopContinueButton" Style="{StaticResource DialogSecondaryButton}"
+                                       Click="StopContinue_Click" Content="继续" IsEnabled="False"
+                                       ToolTip="当前没有可续跑的位置"/>
+                        </StackPanel>
                     </Grid>
                 </StackPanel>
             </Border>

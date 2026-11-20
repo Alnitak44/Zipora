@@ -20,7 +20,9 @@ AppUpdatesURL=https://github.com/Alnitak44/Zipora/releases/latest
 DefaultDirName={autopf}\Zipora
 UsePreviousAppDir=yes
 UsePreviousTasks=yes
-DisableDirPage=auto
+; 始终显示「选择安装位置」。覆盖升级时由 UsePreviousAppDir 预填旧目录，
+; 用户能确认覆盖到哪里，也能改到别的目录。
+DisableDirPage=no
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible

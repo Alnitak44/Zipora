@@ -21,6 +21,8 @@
     <SolidColorBrush x:Key="ZiporaDividerBrush" Color="#363D48"/>
     <SolidColorBrush x:Key="ZiporaFlyoutBackground" Color="#2B3039"/>
     <SolidColorBrush x:Key="ZiporaEmptyBadgeBackground" Color="#303B4B"/>
+    <!-- 拖入提示层：极淡的品牌色，压在列表上不遮文字。 -->
+    <SolidColorBrush x:Key="ZiporaDropHintBackground" Color="#224CC2FF"/>
 
     <!-- 文字 -->
     <SolidColorBrush x:Key="ZiporaTextPrimary" Color="#F2F2F2"/>

@@ -1,0 +1,35 @@
+Zipora 捆绑的 7-Zip 引擎
+========================
+
+本项目分发的是 **7-Zip ZS** 构建，而不是 7-zip.org 的官方发行版。
+
+  - 上游项目：https://github.com/mcmilk/7-Zip-zstd
+  - 版本：7-Zip ZS 26.05 (v1.5.7 R1, x64)
+  - 发布包：7z26.05-zstd-x64.exe
+  - 基础版本：7-Zip 26.05，Copyright (C) 1999-2026 Igor Pavlov
+  - 扩展维护：Copyright (C) 2016- Tino Reichardt，
+                Copyright (C) 2022- Sergey G. Brester，
+                Copyright (C) 2026- fzxx
+
+为什么不是官方 7-Zip
+--------------------
+
+官方 7-Zip 只能“解包” ZSTD 条目，遇到用 ZSTD 压缩的 7z 包会报
+`Unsupported Method`。ZS 构建额外提供 ZSTD / BROTLI / LZ4 / LZ5 / LIZARD
+编解码器，可以正常解开这类第三方打包工具生成的压缩包。
+
+本目录只保留程序实际需要的文件：
+
+  7z.exe      命令行引擎（Zipora 全部解压/压缩调用）
+  7z.dll      引擎模块，必须与 7z.exe 同目录
+  7z.sfx      SFX 模块（自解压压缩包）
+  7zCon.sfx   SFX 模块（控制台版）
+  License.txt 上游许可证（LGPL + unRAR 限制 + BSD 部分）
+
+许可证
+------
+
+引擎仍遵循上游许可证，见同目录 License.txt。分发本程序时必须同时保留
+License.txt 与本说明文件。Zipora 自身代码的许可与引擎无关。
+
+对应源码：https://github.com/mcmilk/7-Zip-zstd （按 LGPL 要求提供获取途径）

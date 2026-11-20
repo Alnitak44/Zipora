@@ -119,19 +119,35 @@ public static class AppStorage
                 CleanPrivateDirectory(Path.Combine(TempRoot, name));
             foreach (string file in Directory.EnumerateFiles(DataRoot, ".write-*"))
                 try { File.Delete(file); } catch { }
+            // Seed each bundled dictionary once and remember the names already
+            // offered: upgrades add new built-ins, while files the user removed
+            // are not resurrected on every launch.
             string seedMarker = Path.Combine(DictionaryRoot, ".initialized");
-            if (!File.Exists(seedMarker))
-            {
-                Directory.CreateDirectory(DictionaryRoot);
-                string defaults = Path.Combine(Layout.AppDirectory, "dictionaries");
-                if (Directory.Exists(defaults))
-                    foreach (string source in Directory.EnumerateFiles(defaults, "*.txt"))
-                    {
-                        string target = Path.Combine(DictionaryRoot, Path.GetFileName(source));
-                        if (!File.Exists(target)) WriteAtomic(target, File.ReadAllBytes(source));
-                    }
-                WriteText(seedMarker, "1");
-            }
+            Directory.CreateDirectory(DictionaryRoot);
+            var seeded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (File.Exists(seedMarker))
+                foreach (string line in File.ReadAllLines(seedMarker))
+                    if (line.Length > 0 && line != "1") seeded.Add(line);
+            bool seedChanged = !File.Exists(seedMarker);
+            // Older builds wrote a bare "1". Treat whatever is already on disk as
+            // offered so a user's deliberate deletion is not undone by the upgrade.
+            if (!seedChanged && seeded.Count == 0)
+                foreach (string existing in Directory.EnumerateFiles(DictionaryRoot, "*.txt"))
+                {
+                    seeded.Add(Path.GetFileName(existing));
+                    seedChanged = true;
+                }
+            string defaults = Path.Combine(Layout.AppDirectory, "dictionaries");
+            if (Directory.Exists(defaults))
+                foreach (string source in Directory.EnumerateFiles(defaults, "*.txt"))
+                {
+                    string name = Path.GetFileName(source);
+                    if (!seeded.Add(name)) continue;
+                    string target = Path.Combine(DictionaryRoot, name);
+                    if (!File.Exists(target)) WriteAtomic(target, File.ReadAllBytes(source));
+                    seedChanged = true;
+                }
+            if (seedChanged) WriteText(seedMarker, string.Join("\n", seeded));
         }
         catch { Dispose(); throw; }
     }

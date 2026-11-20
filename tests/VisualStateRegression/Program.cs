@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 
 internal static class Program
 {
@@ -67,6 +68,9 @@ internal static class Program
         root.Measure(new Size(960, 640));
         root.Arrange(new Rect(0, 0, 960, 640));
         root.UpdateLayout();
+        // 行状态底纹是短动画；让 dispatcher 跑完再截图，避免把动画首帧当成最终外观。
+        Pump(320);
+        root.UpdateLayout();
 
         foreach (bool enabled in new[] { true, false, true, false, true })
         {
@@ -88,6 +92,15 @@ internal static class Program
                 bitmap.Render(root);
                 string label = $"{theme}-{surface}-{(enabled ? "idle" : "busy")}-{scale:0.##}";
                 if (scale == 1.0) Save(bitmap, label);
+                if (scale == 1.0 && surface == "Solid" && enabled)
+                {
+                    // 选中行（第 0 行）与普通行（第 2 行）必须出现可测量的底色差。
+                    var selectedRow = Pixel(bitmap, 600, 46);
+                    var plainRow = Pixel(bitmap, 600, 104);
+                    Assert(Math.Abs(selectedRow.R - plainRow.R) + Math.Abs(selectedRow.G - plainRow.G)
+                        + Math.Abs(selectedRow.B - plainRow.B) > 10,
+                        $"{label}: selected row must paint a visible wash ({selectedRow} vs {plainRow}).");
+                }
                 var expected = Composite(tint.Color, backdrop.Color);
                 foreach (var point in new[] { new Point(800, 150), new Point(800, 350), new Point(800, 500) })
                 {
@@ -143,5 +156,14 @@ internal static class Program
     {
         if (!condition) throw new Exception(message);
         _checks++;
+    }
+
+    private static void Pump(int milliseconds)
+    {
+        var frame = new DispatcherFrame();
+        var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(milliseconds) };
+        timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
+        timer.Start();
+        Dispatcher.PushFrame(frame);
     }
 }

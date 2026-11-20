@@ -91,6 +91,7 @@ internal static class Program
             CheckLateControlAndCaptureLoss();
             CheckCancellationInputs();
             CheckVirtualizedScrolling();
+            CheckListSurfaceTransitions();
             Invoke("ResetPointerGesture");
             Expect(!Field<bool>("_dragOutStarted"), "selection tests never start OLE extraction");
             Console.WriteLine($"PASS: {_checks} selection gesture checks; storage: {root}");
@@ -111,6 +112,35 @@ internal static class Program
             app?.Shutdown();
             AppStorage.Dispose();
         }
+    }
+
+    /// <summary>
+    /// 空态 / 列表 / 骨架屏三者交替时，淡出期间元素仍是 Visible；
+    /// 状态判断必须用显式标记，否则空压缩包会误显示列表而不是空态。
+    /// </summary>
+    private static void CheckListSurfaceTransitions()
+    {
+        var empty = (FrameworkElement)_window.FindName("EmptyState");
+        var skeleton = (FrameworkElement)_window.FindName("SkeletonOverlay");
+        Invoke("ShowSkeleton");
+        Expect(skeleton.Visibility == Visibility.Visible, "skeleton becomes visible");
+        Invoke("HideSkeleton");
+        Pump(260);
+        Expect(skeleton.Visibility == Visibility.Collapsed, "skeleton collapses after its fade-out");
+        Invoke("ShowEmptyState", true);
+        Pump(260);
+        Expect(empty.Visibility == Visibility.Visible && empty.Opacity > .99, "empty state fades in fully");
+        Expect(_list.Visibility == Visibility.Collapsed, "list hides while the empty state is shown");
+
+        // 关键回归：骨架屏刚淡出（Visibility 仍是 Visible）时恢复列表，不能把列表留在折叠状态。
+        Invoke("ShowSkeleton");
+        Pump(40);
+        Invoke("HideSkeleton");
+        Invoke("ShowEmptyState", false);
+        Pump(320);
+        Expect(_list.Visibility == Visibility.Visible && _list.Opacity > .99,
+            "list is restored right after a skeleton fade-out");
+        Expect(empty.Visibility == Visibility.Collapsed, "empty state collapses when the list is shown");
     }
 
     private static void CheckPendingClick()
@@ -317,6 +347,14 @@ internal static class Program
     {
         if (!condition) throw new Exception(name);
         _checks++;
+    }
+    private static void Pump(int milliseconds)
+    {
+        var frame = new DispatcherFrame();
+        var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(milliseconds) };
+        timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
+        timer.Start();
+        Dispatcher.PushFrame(frame);
     }
     private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
     {

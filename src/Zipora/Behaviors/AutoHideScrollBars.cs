@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
 namespace Zipora.Behaviors;
@@ -96,7 +97,7 @@ public static class AutoHideScrollBars
         private void Reveal()
         {
             foreach (var bar in _bars)
-                if (bar.IsVisible) bar.Opacity = 1;
+                if (bar.IsVisible) Animate(bar, 1);
             _hideTimer.Stop();
             if (!_dragging) _hideTimer.Start();
         }
@@ -112,7 +113,7 @@ public static class AutoHideScrollBars
             _hideTimer.Stop();
             if (_dragging) return;
             foreach (var bar in _bars)
-                if (!bar.IsMouseOver) bar.Opacity = 0;
+                if (!bar.IsMouseOver) Animate(bar, 0);
         }
 
         public void Dispose()
@@ -122,8 +123,29 @@ public static class AutoHideScrollBars
             _host.Unloaded -= Host_Unloaded;
             _host.PreviewMouseWheel -= Host_PreviewMouseWheel;
             _host.PreviewMouseMove -= Host_PreviewMouseMove;
-            foreach (var bar in _bars) bar.Opacity = 1;
+            foreach (var bar in _bars) Animate(bar, 1, TimeSpan.Zero);
             _bars.Clear();
+        }
+
+        /// <summary>滚动条只做短淡入淡出，避免每次滚动结束时边缘硬闪。</summary>
+        private static void Animate(ScrollBar bar, double to, TimeSpan? duration = null)
+        {
+            double from = bar.Opacity;
+            if (Math.Abs(from - to) < 0.01 && !bar.HasAnimatedProperties) return;
+            if (!Services.Motion.Enabled)
+            {
+                bar.BeginAnimation(UIElement.OpacityProperty, null);
+                bar.Opacity = to;
+                return;
+            }
+            bar.BeginAnimation(UIElement.OpacityProperty, null);
+            bar.Opacity = to; // 基础值即终态，动画结束后自然停在这里
+            bar.BeginAnimation(UIElement.OpacityProperty,
+                new DoubleAnimation(from, to, duration ?? TimeSpan.FromMilliseconds(140))
+                {
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                    FillBehavior = FillBehavior.Stop,
+                });
         }
     }
 
