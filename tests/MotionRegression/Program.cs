@@ -12,6 +12,7 @@ using Zipora.Services;
 /// <summary>
 /// 动效回归：只验证「动画结束后落到正确终态」和「快速反向不会留下错误状态」，
 /// 不把某一帧的观感当作通过依据。实际手感仍需人工确认。
+/// CI 等无桌面会话环境下系统会关闭界面动画，此时 Motion 直接落终态，断言同样成立。
 /// </summary>
 internal static class Program
 {
@@ -54,8 +55,11 @@ internal static class Program
         Pump(320);
         Check(element.Opacity > 0.999, "fade-in ends fully visible");
         Check(element.Visibility == Visibility.Visible, "fade-in leaves element visible");
-        var shift = (TranslateTransform)element.RenderTransform;
-        Check(Math.Abs(shift.X) < 0.01 && Math.Abs(shift.Y) < 0.01, "fade-in settles at zero offset (no snap-back)");
+        // 系统关闭界面动画时 RenderTransform 保持 Transform.Identity（MatrixTransform），
+        // 因此读取矩阵偏移，兼容「有动画」和「直接落终态」两种环境。
+        var shift = element.RenderTransform.Value;
+        Check(Math.Abs(shift.OffsetX) < 0.01 && Math.Abs(shift.OffsetY) < 0.01,
+            "fade-in settles at zero offset (no snap-back)");
         Check(!element.HasAnimatedProperties, "fade-in releases its animations");
         host.Close();
     }
@@ -169,8 +173,9 @@ internal static class Program
         Pump(120);
         list.UpdateLayout();
 
-        var row = (ListViewItem)list.ItemContainerGenerator.ContainerFromIndex(3)!;
+        var row = list.ItemContainerGenerator.ContainerFromIndex(3) as ListViewItem;
         Check(row != null, "row container realized");
+        if (row is null) throw new Exception("row container not realized");
         var text = FindText(row);
         double textLeft = text.TranslatePoint(new Point(0, 0), row).X;
 
