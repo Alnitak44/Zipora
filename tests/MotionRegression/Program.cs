@@ -6,6 +6,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using System.Xml.Linq;
 using System.IO;
+using System.Reflection;
 using Zipora.Behaviors;
 using Zipora.Services;
 
@@ -17,6 +18,7 @@ using Zipora.Services;
 internal static class Program
 {
     private static int _checks;
+    private static int _skipped;
 
     [STAThread]
     private static int Main()
@@ -27,6 +29,8 @@ internal static class Program
             app.InitializeComponent();
             SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
             ThemeManager.Init("Light");
+            ApplyMotionOverride();
+            Console.WriteLine($"motion animations enabled: {Motion.Enabled}");
 
             CheckFadeInSettles();
             CheckFadeOutCollapses();
@@ -36,7 +40,8 @@ internal static class Program
             CheckFileRowStateWashes();
             CheckTreeExpansion();
 
-            Console.WriteLine($"PASS: {_checks} motion checks");
+            var note = _skipped == 0 ? string.Empty : $"; {_skipped} frame checks skipped (system animations off)";
+            Console.WriteLine($"PASS: {_checks} motion checks{note}");
             app.Shutdown();
             return 0;
         }
@@ -45,6 +50,20 @@ internal static class Program
             Console.Error.WriteLine(ex);
             return 1;
         }
+    }
+
+    /// <summary>
+    /// 设置 ZIPORA_MOTION_FORCE=on/off 可在同一台机器上分别覆盖「动画开启」和
+    /// 「系统关闭动画」两条分支；不设置时跟随系统设置（CI 默认即关闭）。
+    /// </summary>
+    private static void ApplyMotionOverride()
+    {
+        var value = Environment.GetEnvironmentVariable("ZIPORA_MOTION_FORCE");
+        if (string.IsNullOrWhiteSpace(value)) return;
+        bool enabled = value.Equals("on", StringComparison.OrdinalIgnoreCase) || value == "1";
+        var field = typeof(Motion).GetField("_forcedEnabled", BindingFlags.NonPublic | BindingFlags.Static);
+        if (field is null) throw new Exception("Motion override field missing");
+        field.SetValue(null, (bool?)enabled);
     }
 
     private static void CheckFadeInSettles()
@@ -97,8 +116,15 @@ internal static class Program
         var host = Host(element);
         element.Visibility = Visibility.Visible;
         Motion.FadeIn(element, dy: 4, ms: 200);
-        Pump(40);
-        Check(element.Opacity < 0.95, "fade-in still starts transparent when the caller pre-shows the element");
+        if (Motion.Enabled)
+        {
+            Pump(40);
+            Check(element.Opacity < 0.95, "fade-in still starts transparent when the caller pre-shows the element");
+        }
+        else
+        {
+            _skipped++;
+        }
         Pump(400);
         Check(element.Opacity > 0.999, "pre-shown element still settles fully visible");
         host.Close();
@@ -119,41 +145,49 @@ internal static class Program
         viewer.UpdateLayout();
         Check(viewer.ScrollableHeight > 0, "test scroller has scrollable content");
 
-        double start = viewer.VerticalOffset;
-        viewer.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, -120)
-        { RoutedEvent = UIElement.PreviewMouseWheelEvent });
-        Pump(300);
-        Check(viewer.VerticalOffset > start, "wheel down moves the viewport");
-        double afterOne = viewer.VerticalOffset;
-
-        // 连续反向：动画途中再次滚动，最终应从当前可见位置接续，而不是排队或回跳。
-        viewer.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, -120)
-        { RoutedEvent = UIElement.PreviewMouseWheelEvent });
-        Pump(40);
-        viewer.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, 120)
-        { RoutedEvent = UIElement.PreviewMouseWheelEvent });
-        Pump(400);
-        Check(viewer.VerticalOffset < afterOne + 60, "rapid reverse scroll continues from the visible offset");
-
-        // 键盘/拖动滚动条等外部滚动后，下一次滚轮必须从当前可见位置继续，不能回到旧目标。
-        viewer.ScrollToVerticalOffset(viewer.ScrollableHeight * 0.5);
-        Pump(60);
-        double external = viewer.VerticalOffset;
-        viewer.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, -120)
-        { RoutedEvent = UIElement.PreviewMouseWheelEvent });
-        Pump(300);
-        Check(viewer.VerticalOffset > external + 1, "wheel continues from an externally changed offset");
-
-        // 连续向下直到边界，不得超出可滚动范围。
-        for (int i = 0; i < 200; i++)
+        if (Motion.Enabled)
         {
+            double start = viewer.VerticalOffset;
             viewer.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, -120)
             { RoutedEvent = UIElement.PreviewMouseWheelEvent });
-            Pump(8);
+            Pump(300);
+            Check(viewer.VerticalOffset > start, "wheel down moves the viewport");
+            double afterOne = viewer.VerticalOffset;
+
+            // 连续反向：动画途中再次滚动，最终应从当前可见位置接续，而不是排队或回跳。
+            viewer.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, -120)
+            { RoutedEvent = UIElement.PreviewMouseWheelEvent });
+            Pump(40);
+            viewer.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, 120)
+            { RoutedEvent = UIElement.PreviewMouseWheelEvent });
+            Pump(400);
+            Check(viewer.VerticalOffset < afterOne + 60, "rapid reverse scroll continues from the visible offset");
+
+            // 键盘/拖动滚动条等外部滚动后，下一次滚轮必须从当前可见位置继续，不能回到旧目标。
+            viewer.ScrollToVerticalOffset(viewer.ScrollableHeight * 0.5);
+            Pump(60);
+            double external = viewer.VerticalOffset;
+            viewer.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, -120)
+            { RoutedEvent = UIElement.PreviewMouseWheelEvent });
+            Pump(300);
+            Check(viewer.VerticalOffset > external + 1, "wheel continues from an externally changed offset");
+
+            // 连续向下直到边界，不得超出可滚动范围。
+            for (int i = 0; i < 200; i++)
+            {
+                viewer.RaiseEvent(new MouseWheelEventArgs(Mouse.PrimaryDevice, Environment.TickCount, -120)
+                { RoutedEvent = UIElement.PreviewMouseWheelEvent });
+                Pump(8);
+            }
+            Pump(500);
+            Check(Math.Abs(viewer.VerticalOffset - viewer.ScrollableHeight) < 1.5,
+                "repeated wheel reaches the bottom without overshoot");
         }
-        Pump(500);
-        Check(Math.Abs(viewer.VerticalOffset - viewer.ScrollableHeight) < 1.5,
-            "repeated wheel reaches the bottom without overshoot");
+        else
+        {
+            // 系统关闭动画时不接管滚轮，交给原生滚动，因此这里没有可断言的动画帧。
+            _skipped += 4;
+        }
         host.Close();
     }
 
@@ -245,20 +279,35 @@ internal static class Program
         Check(hostPresenter.Visibility == Visibility.Collapsed, "collapsed tree node hides its children");
 
         item.IsExpanded = true;
-        Pump(60);
-        Check(hostPresenter.Visibility == Visibility.Visible, "expanding tree node shows its children");
-        double midHeight = hostPresenter.ActualHeight;
-        Pump(320);
-        Check(hostPresenter.ActualHeight > 20, "expanded tree children receive real layout height");
-        double expandedHeight = hostPresenter.ActualHeight;
-        Check(midHeight > 0 && midHeight < expandedHeight - 1, "tree expands gradually instead of snapping open");
+        double expandedHeight;
+        if (Motion.Enabled)
+        {
+            Pump(60);
+            Check(hostPresenter.Visibility == Visibility.Visible, "expanding tree node shows its children");
+            double midHeight = hostPresenter.ActualHeight;
+            Pump(320);
+            Check(hostPresenter.ActualHeight > 20, "expanded tree children receive real layout height");
+            expandedHeight = hostPresenter.ActualHeight;
+            Check(midHeight > 0 && midHeight < expandedHeight - 1, "tree expands gradually instead of snapping open");
 
-        item.IsExpanded = false;
-        Pump(40);
-        Check(hostPresenter.Visibility == Visibility.Visible, "collapse animation keeps children visible while shrinking");
-        Check(hostPresenter.ActualHeight < expandedHeight, "tree children shrink before collapsing");
-        Pump(360);
-        Check(hostPresenter.Visibility == Visibility.Collapsed, "collapsed tree node hides children after the animation");
+            item.IsExpanded = false;
+            Pump(40);
+            Check(hostPresenter.Visibility == Visibility.Visible, "collapse animation keeps children visible while shrinking");
+            Check(hostPresenter.ActualHeight < expandedHeight, "tree children shrink before collapsing");
+            Pump(360);
+            Check(hostPresenter.Visibility == Visibility.Collapsed, "collapsed tree node hides children after the animation");
+        }
+        else
+        {
+            // 系统关闭动画时直接落终态，只验证展开/收起后的布局结果。
+            _skipped += 3;
+            Pump(320);
+            Check(hostPresenter.ActualHeight > 20, "expanded tree children receive real layout height");
+            expandedHeight = hostPresenter.ActualHeight;
+            item.IsExpanded = false;
+            Pump(360);
+            Check(hostPresenter.Visibility == Visibility.Collapsed, "collapsed tree node hides children after the animation");
+        }
         item.IsExpanded = true;
         Pump(320);
         Check(hostPresenter.ActualHeight > expandedHeight - 1, "re-expanding restores the full height");
