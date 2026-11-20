@@ -15,11 +15,8 @@ public static class Motion
     private sealed class State { public int Version; public bool Visible; }
     private static readonly ConditionalWeakTable<UIElement, State> States = new();
 
-    /// <summary>仅回归测试使用：强制动画开/关，覆盖系统设置关闭动画的分支。</summary>
-    private static bool? _forcedEnabled = null;
-
     /// <summary>系统是否允许界面动画（高对比度下自动关闭）。</summary>
-    public static bool Enabled => _forcedEnabled ?? (SystemParameters.ClientAreaAnimation && !SystemParameters.HighContrast);
+    public static bool Enabled => SystemParameters.ClientAreaAnimation && !SystemParameters.HighContrast;
 
     private static int Begin(UIElement element)
     {

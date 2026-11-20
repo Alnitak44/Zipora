@@ -6,7 +6,6 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using System.Xml.Linq;
 using System.IO;
-using System.Reflection;
 using Zipora.Behaviors;
 using Zipora.Services;
 
@@ -29,7 +28,6 @@ internal static class Program
             app.InitializeComponent();
             SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
             ThemeManager.Init("Light");
-            ApplyMotionOverride();
             Console.WriteLine($"motion animations enabled: {Motion.Enabled}");
 
             CheckFadeInSettles();
@@ -50,20 +48,6 @@ internal static class Program
             Console.Error.WriteLine(ex);
             return 1;
         }
-    }
-
-    /// <summary>
-    /// 设置 ZIPORA_MOTION_FORCE=on/off 可在同一台机器上分别覆盖「动画开启」和
-    /// 「系统关闭动画」两条分支；不设置时跟随系统设置（CI 默认即关闭）。
-    /// </summary>
-    private static void ApplyMotionOverride()
-    {
-        var value = Environment.GetEnvironmentVariable("ZIPORA_MOTION_FORCE");
-        if (string.IsNullOrWhiteSpace(value)) return;
-        bool enabled = value.Equals("on", StringComparison.OrdinalIgnoreCase) || value == "1";
-        var field = typeof(Motion).GetField("_forcedEnabled", BindingFlags.NonPublic | BindingFlags.Static);
-        if (field is null) throw new Exception("Motion override field missing");
-        field.SetValue(null, (bool?)enabled);
     }
 
     private static void CheckFadeInSettles()
